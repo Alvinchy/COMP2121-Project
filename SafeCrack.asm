@@ -105,15 +105,18 @@
 	.endmacro
 
 //Define Constants
+
 	//Keypad related
 	.equ INITCOLMASK 	= 0xEF
 	.equ INITROWMASK 	= 0x01
 	.equ KEYRESETCOUNT	= 0x0D //Count down from this before next key may be read
+
 	//LCD Commands
 	.equ CLEARLCD		= 0b00000001 //Clear display and reset cursor
 	.equ ROW2LCD		= 0b11000000 //Move cursor to beginning of row 2
 	.equ CURSORL		= 0b00010000 //Shift cursor to the left
 	.equ CURSORR		= 0b00010100 //Shift cursor to the right
+
 	//Encoding of modes
 	.equ STARTMODE		= 0b00000000 //Start screen
 	.equ STARTCDMODE	= 0b00000001 //Start screen with countdown
@@ -124,6 +127,11 @@
 	.equ WINMODE		= 0b00000110 //Game complete screen
 	.equ LOSEMODE		= 0b00000111 //Timeout screen
 
+	//Number of overflows for times with prescaler 256
+	.equ MS1000			= 244
+	.equ MS500			= 122
+	.equ MS250			= 61
+
 .DSEG
 	Code: 		.BYTE 3 //Correct code
 	PotTarget: 	.BYTE 2 //Potentiometer target
@@ -132,6 +140,10 @@
 	Mode:		.BYTE 1	//Current screen
 	PBDisable:	.BYTE 1	//Disable push buttons (flag)
 	LastKey:	.BYTE 1	//Last key pressed on keypad
+
+	//Timer dependent
+	PBDebounceTimer:	.BYTE 1 //Counts number of overflows of timer 2 before PBDisable flag is cleared
+
 
 .CSEG
 	//Set up interrupt vectors
@@ -143,6 +155,9 @@
 
 	.org INT1ADDR
 	jmp PB1Pressed
+	
+	.org OVF2ADDR
+	jmp T2OVF
 
 	.org OVF0ADDR
 	jmp T0OVF
@@ -190,6 +205,10 @@
 			ldi ZH, high(LastKey)
 			ldi ZL, low(LastKey)
 			st Z, r16
+
+			ldi ZH, high(PBDebounceTimer)
+			ldi ZL, low(PBDebounceTimer)
+			st Z, r16
 			
 			ldi r16, 20 //Default difficulty: easiest
 
@@ -202,7 +221,8 @@
 			ldi r16, (0b10 << ISC10) | (0b10 << ISC00) //Falling edge triggered
 			sts EICRA, r16
 			ldi r16, (1 << INT1) | (1 << INT0) //Unmask push button interrupts
-			sts EIMSK, r16
+			out EIMSK, r16
+			sei
 
 			//Timer 0
 			clr r16 //Normal timer operation
@@ -211,6 +231,14 @@
 			sts TCCR0B, r16
 			ldi r16, (1 << TOIE0) //Enable timer 0 overflow interrupt
 			sts TIMSK0, r16
+
+			//Timer 2
+			clr r16 //Normal timer operation
+			sts TCCR2A, r16
+			ldi r16, (0b010 << CS20) //Set prescaler to 8
+			sts TCCR2B, r16
+			ldi r16, (0b1 << TOIE0) //Enable timer 2 overflow interrupt
+			sts TIMSK2, r16
 
 			//Timer 3
 			ldi r16, (0b10 << COM3B0) | (0b01 << WGM30) //Clear on output compare match, 8-bit Fast PWM
@@ -241,6 +269,9 @@
 			sts DDRL, r16
 
 			clr r16
+			out DDRD, r16
+			
+			//Initialise ports
 			out PORTF, r16 
 			out PORTA, r16
 			out PORTC, r16
@@ -318,6 +349,8 @@
 		ldi ZL, low(Mode)
 		ldi r16, STARTCDMODE
 		st Z, r16
+
+		do_lcd_command CLEARLCD
 		
 	ResetPotScreen:
 		ldi ZH, high(Mode)
@@ -444,16 +477,110 @@
 
 	////////////////////////////////Interrupts////////////////////////////////
 	PB0Pressed:
-
-	reti
+		jmp Reset
 
 	PB1Pressed:
+		push r16
+		in r16, SREG
+		push r16
+		push r17
+		push ZH
+		push ZL
 
-	reti
+		ldi ZH, high(PBDisable)
+		ldi ZL, low(PBDisable)
+		ld r16, Z
+		cpi r16, 1
+		breq EndPB1Pressed
+
+		ldi r16, 1
+		st Z, r16
+
+		ldi ZH, high(PBDebounceTimer)
+		ldi ZL, low(PBDebounceTimer)
+		clr r16
+		st Z, r16
+
+		ldi ZH, high(Mode)
+		ldi ZL, low(Mode)
+		ld r16, Z
+		
+		cpi r16, STARTMODE
+		breq GoToStartCDScreen
+
+		cpi	r16, WINMODE
+		breq PB1ResetGame
+		cpi r16, LOSEMODE
+		breq PB1ResetGame
+		rjmp EndPB1Pressed
+
+		PB1ResetGame:
+		jmp Reset
+
+		GoToStartCDScreen: //Next screen operates independently of previous screen's registers
+		pop ZL
+		pop ZH
+		pop r17
+		pop r16
+		out SREG, r16
+		pop r16
+		
+		//reti increments SP by 2 and enables interrupts
+		in r16, SPL
+		in r17, SPH
+		subi r16, low(-2)
+		sbci r17, high(-2)
+		out SPL, r16
+		out SPH, r17
+		sei
+		jmp StartCDScreen
+		
+		
+		EndPB1Pressed:
+		pop ZL
+		pop ZH
+		pop r17
+		pop r16
+		out SREG, r16
+		pop r16	
+		reti
 	
 	T0OVF:
 
 	reti
+
+
+	T2OVF:
+		push r16
+		in r16, SREG
+		push r16
+		push ZH
+		push ZL
+
+		ldi ZH, high(PBDebounceTimer)
+		ldi ZL, low(PBDebounceTimer)
+		ld r16, Z
+		inc r16
+		st Z, r16
+
+		//Count to 8 = 1ms
+		cpi r16, 200
+		brne EndT2OVF //Skip if 25ms have not elapsed
+
+		clr r16
+		st Z, r16
+
+		ldi ZH, high(PBDisable)
+		ldi ZL, low(PBDisable)
+		st Z, r16 //Clear flag
+
+		EndT2OVF:
+		pop ZL
+		pop ZH
+		pop r16
+		out SREG, r16
+		pop r16
+		reti
 
 	T3OVF:
 		push r16
