@@ -385,7 +385,11 @@
 		//cpi r22, 
 
 		KeyStartMode:
-			ldi r23, 0xFF
+			ldi r23, 0xFF //Pressing a keypad button does not exit the start screen
+
+			ldi ZH, high(CDTime)
+			ldi ZL, low(CDTime)
+
 			cpi r20, 0b10000001
 			breq EasyDifficulty
 			cpi r20, 0b10000010
