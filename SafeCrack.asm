@@ -22,9 +22,25 @@
 		rcall lcd_wait
 		pop r16
 	.endmacro
-	.macro ScanKeypad //Uses r16, r17, r18, r19 ZH and ZL.
+	.macro ScanKeypad //cannot place in function; loop terminated by button, ret would cause issues in stack
+	//r16 (Row Mask)
+	//r17 (Col Mask)
+	//r18 (Read value)
+	//r19 (Debounce Countdown)
+	//r20 (Button)
+	//r21 (Last button)
+	//r22 (Mode)
+	//r23 (Next Mode)
+	//ZH and ZL
+
+		ldi ZH, high(Mode)
+		ldi ZL, low(Mode)
+		ld r22, Z
+		
 		ldi ZH, high(LastKey)
 		ldi ZL, low(LastKey)
+		ldi r19, KEYRESETCOUNT
+
 		//Continuous polling loop
 		KeyWholeLoop:
 			ldi r17, INITCOLMASK
@@ -42,8 +58,31 @@
 			lds r18, PINL
 			and r18, r16
 			brne KeyNextRow
-			//Action if input detected
-			call ProcessKey
+
+		//If key detected
+			//Determine button pressed in CCCCRRRR and store in r20
+			mov r20, r17
+			com r20
+			or r20, r16
+			
+			//Compare to last button; if it's the same, skip, since the keypads are level sensitive and will read once per clock cycle
+			ld r21, Z
+			cp r21, r20
+			breq KeyProcessFin
+
+			//If key is valid
+			st Z, r20
+			call KeyProcess //Returns next mode or 0xFF in r23; 0xFF indicates staying on current mode
+
+			cpi r23, 0xFF
+			breq KeyProcessFin
+			cpi r23, RESETPOTMODE
+			jmp ResetPotScreen
+			cpi r23, ENTERCODEMODE
+			jmp EnterCodeScreen
+			
+
+		KeyProcessFin:
 			ldi r19, KEYRESETCOUNT
 
 		KeyNextRow:
@@ -52,16 +91,17 @@
 			breq KeyNextCol
 			dec r19
 			brne KeyRowLoop
+
 			st Z, r19 //Stores 0 in LastKey so that any following key press is valid
 			ldi r19, KEYRESETCOUNT
-			rjmp KeyRowLoop
+			jmp KeyRowLoop
 
 		KeyNextCol:
 			lsl r17
 			inc r17
 			cpi r17, 0xFF
 			breq KeyWholeLoop
-			rjmp KeyColLoop
+			jmp KeyColLoop
 	.endmacro
 
 //Define Constants
@@ -272,70 +312,131 @@
 		
 		ScanKeypad		
 
-		ReadDifficulty:
-			ldi r16, INITROWMASK
-			ReadDifficultyRowLoop:
-				lds r17, PINL
-				and r17, r16
-				breq DifficultySelected
-				jmp ReadDifficultyNextRow
-				
-				DifficultySelected:
-				//Determine which button was pressed and update difficulty
-				cpi r16, 0b00000001
-				breq EasyDifficulty
-				cpi r16, 0b00000010
-				breq MedDifficulty
-				cpi r16, 0b00000100
-				breq HardDifficulty
-				cpi r16, 0b00001000
-				breq ExtremeDifficulty
+	
+	StartCDScreen:
+		ldi ZH, high(Mode)
+		ldi ZL, low(Mode)
+		ldi r16, STARTCDMODE
+		st Z, r16
+		
+	ResetPotScreen:
+		ldi ZH, high(Mode)
+		ldi ZL, low(Mode)
+		ldi r16, RESETPOTMODE
+		st Z, r16
 
-				EasyDifficulty:
-					ldi r17, 20
-					st Z, r17
-					do_lcd_command CURSORL
-					do_lcd_data_i 'E'
-					rjmp ReadDifficultyNextRow
+	FindPotScreen:
+		ldi ZH, high(Mode)
+		ldi ZL, low(Mode)
+		ldi r16, FINDPOTMODE
+		st Z, r16
 
-				MedDifficulty:
-					ldi r17, 15
-					st Z, r17
-					do_lcd_command CURSORL
-					do_lcd_data_i 'M'
-					rjmp ReadDifficultyNextRow
+	FindCodeScreen:
+		ldi ZH, high(Mode)
+		ldi ZL, low(Mode)
+		ldi r16, FINDCODEMODE
+		st Z, r16
 
-				HardDifficulty:
-					ldi r17, 10
-					st Z, r17
-					do_lcd_command CURSORL
-					do_lcd_data_i 'H'
-					rjmp ReadDifficultyNextRow
+	EnterCodeScreen:
+		ldi ZH, high(Mode)
+		ldi ZL, low(Mode)
+		ldi r16, ENTERCODEMODE
+		st Z, r16
 
-				ExtremeDifficulty:
-					ldi r17, 6
-					st Z, r17
-					do_lcd_command CURSORL
-					do_lcd_data_i 'X'
-					rjmp ReadDifficultyNextRow
+	WinScreen:
+		ldi ZH, high(Mode)
+		ldi ZL, low(Mode)
+		ldi r16, WINMODE
+		st Z, r16
 
-				ReadDifficultyNextRow:
-					lsl r16
-					cpi r16, 0b00010000
-					breq ReadDifficultyEnd
-					jmp ReadDifficultyRowLoop
-
-			ReadDifficultyEnd:
-			jmp ReadDifficulty
+	LoseScreen:
+		ldi ZH, high(Mode)
+		ldi ZL, low(Mode)
+		ldi r16, LOSEMODE
+		st Z, r16
 
 	//Endless loop to halt operation
 	LOOP:
 		rjmp LOOP
 	////////////////////////////////Functions/////////////////////////////////
 	
-	ProcessKey:
+	KeyProcess:
+	//Inputs:
+	//r20 (Button)
+	//r22 (Mode)
 
-	ret
+	//Output:
+	//r23 (Next Mode)
+	
+	
+		push r16
+		push r17
+		push r18
+		push r19
+		push r20
+		push r21
+		push r22
+		push ZH
+		push ZL
+
+	//Determine which mode
+		cpi r22, STARTMODE
+		breq KeyStartMode
+		//cpi r22, 
+
+		KeyStartMode:
+			ldi r23, 0xFF
+			cpi r20, 0b10000001
+			breq EasyDifficulty
+			cpi r20, 0b10000010
+			breq MedDifficulty
+			cpi r20, 0b10000100
+			breq HardDifficulty
+			cpi r20, 0b10001000
+			breq ExtremeDifficulty
+			jmp EndKeyProcess //Skip if button pressed was not a letter
+
+			EasyDifficulty:
+				ldi r16, 20
+				st Z, r16
+				do_lcd_command CURSORL
+				do_lcd_data_i 'E'
+				jmp EndKeyProcess
+
+			MedDifficulty:
+				ldi r16, 15
+				st Z, r16
+				do_lcd_command CURSORL
+				do_lcd_data_i 'M'
+				jmp EndKeyProcess
+
+			HardDifficulty:
+				ldi r16, 10
+				st Z, r16
+				do_lcd_command CURSORL
+				do_lcd_data_i 'H'
+				jmp EndKeyProcess
+
+			ExtremeDifficulty:
+				ldi r16, 6
+				st Z, r16
+				do_lcd_command CURSORL
+				do_lcd_data_i 'X'
+				jmp EndKeyProcess
+
+
+	EndKeyProcess:
+		pop ZL
+		pop ZH
+		pop r22
+		pop r21
+		pop r20
+		pop r19
+		pop r18
+		pop r17
+		pop r16
+		ret
+
 
 	////////////////////////////////Interrupts////////////////////////////////
 	PB0Pressed:
