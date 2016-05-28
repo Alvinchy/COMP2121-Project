@@ -22,10 +22,53 @@
 		rcall lcd_wait
 		pop r16
 	.endmacro
+	.macro ScanKeypad //Uses r16, r17, r18, r19 ZH and ZL.
+		ldi ZH, high(LastKey)
+		ldi ZL, low(LastKey)
+		//Continuous polling loop
+		KeyWholeLoop:
+			ldi r17, INITCOLMASK
+
+		KeyColLoop:
+			ldi r16, INITROWMASK
+			sts PORTL, r17
+			ldi r18, 0xFF
+
+		KeyDelay:
+			dec r18
+			brne KeyDelay
+
+		KeyRowLoop:
+			lds r18, PINL
+			and r18, r16
+			brne KeyNextRow
+			//Action if input detected
+			call ProcessKey
+			ldi r19, KEYRESETCOUNT
+
+		KeyNextRow:
+			lsl r16
+			cpi r16, 0x10
+			breq KeyNextCol
+			dec r19
+			brne KeyRowLoop
+			st Z, r19 //Stores 0 in LastKey so that any following key press is valid
+			ldi r19, KEYRESETCOUNT
+			rjmp KeyRowLoop
+
+		KeyNextCol:
+			lsl r17
+			inc r17
+			cpi r17, 0xFF
+			breq KeyWholeLoop
+			rjmp KeyColLoop
+	.endmacro
 
 //Define Constants
+	//Keypad related
 	.equ INITCOLMASK 	= 0xEF
 	.equ INITROWMASK 	= 0x01
+	.equ KEYRESETCOUNT	= 0x0D //Count down from this before next key may be read
 	//LCD Commands
 	.equ CLEARLCD		= 0b00000001 //Clear display and reset cursor
 	.equ ROW2LCD		= 0b11000000 //Move cursor to beginning of row 2
@@ -226,6 +269,8 @@
 		//Make Z point to CDTime in case difficulty is changed
 		ldi ZH, high(CDTime)
 		ldi ZL, low(CDTime)
+		
+		ScanKeypad		
 
 		ReadDifficulty:
 			ldi r16, INITROWMASK
@@ -286,6 +331,11 @@
 	//Endless loop to halt operation
 	LOOP:
 		rjmp LOOP
+	////////////////////////////////Functions/////////////////////////////////
+	
+	ProcessKey:
+
+	ret
 
 	////////////////////////////////Interrupts////////////////////////////////
 	PB0Pressed:
@@ -301,8 +351,24 @@
 	reti
 
 	T3OVF:
-	
-	reti	
+		push r16
+		in r16, SREG
+		push r16
+		push ZH
+		push ZL
+		
+		ldi ZH, high(Mode)
+		ldi ZL, low(Mode)
+		ld r16, Z
+		
+		//cpi r16, 
+		
+		pop ZL
+		pop ZH
+		pop r16
+		out SREG, r16
+		pop r16	
+		reti	
 
 	////////////////////////////////////LCD////////////////////////////////////
 	.equ LCD_RS = 7
