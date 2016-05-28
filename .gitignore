@@ -3,3 +3,4 @@ SafeCrack.map
 *.obj
 AvrBuild.bat
 *.tmp
+*.bat
