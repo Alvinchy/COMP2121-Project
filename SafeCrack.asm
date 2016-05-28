@@ -221,7 +221,8 @@
 			ldi r16, (0b10 << ISC10) | (0b10 << ISC00) //Falling edge triggered
 			sts EICRA, r16
 			ldi r16, (1 << INT1) | (1 << INT0) //Unmask push button interrupts
-			sts EIMSK, r16
+			out EIMSK, r16
+			sei
 
 			//Timer 0
 			clr r16 //Normal timer operation
