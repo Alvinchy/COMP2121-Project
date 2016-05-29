@@ -165,20 +165,23 @@
 	.equ MS250			= 61
 
 .DSEG
-	Code: 		.BYTE 3 //Correct code
-	PotTarget: 	.BYTE 1 //Potentiometer target
-	PotValue:	.BYTE 1 //Potentiometer read
-	RoundNum: 	.BYTE 1 //Number of rounds played
-	CDTime:		.BYTE 1	//Countdown time
-	Mode:		.BYTE 1	//Current screen
-	PBDisable:	.BYTE 1	//Disable push buttons (flag)
-	LastKey:	.BYTE 1	//Last key pressed on keypad
-	NewRound:	.BYTE 1 //Flag indicating if timer on potentiometer screens needs to be reset
+	Code: 			.BYTE 3 //Correct code
+	PotTarget: 		.BYTE 1 //Potentiometer target
+	PotValue:		.BYTE 1 //Potentiometer read
+	PotCorrect:		.BYTE 1 //Flag indicating if the potentiometer position is correct
+	PotRoundClear:	.BYTE 1 //Flag indicating if the potentiometer round has been successfully cleared
+	RoundNum: 		.BYTE 1 //Number of rounds played
+	CDTime:			.BYTE 1	//Countdown time
+	Mode:			.BYTE 1	//Current screen
+	PBDisable:		.BYTE 1	//Disable push buttons (flag)
+	LastKey:		.BYTE 1	//Last key pressed on keypad
+	NewRound:		.BYTE 1 //Flag indicating if timer on potentiometer screens needs to be reset
 
 	//Timer dependent
 	PBDebounceTimer:	.BYTE 1 //Counts number of overflows of timer 2 before PBDisable flag is cleared
 	CurrentCDTime:		.BYTE 1 //Stores the current value of the countdown
 	CDOVFCount:			.BYTE 1 //Counts number of overflows of timer 0 for the operation of countdowns
+	PotOVFCountdown:	.BYTE 1 //Counts number of overflows of timer 0 for a valid potentiometer read
 
 
 .CSEG
@@ -225,7 +228,15 @@
 			ldi ZH, high(PotTarget)
 			ldi ZL, low(PotTarget)
 			st Z, r16
+		
+			ldi ZH, high(PotCorrect)
+			ldi ZL, low(PotCorrect)
+			st Z, r16
 			
+			ldi ZH, high(PotRoundClear)
+			ldi ZL, low(PotRoundClear)
+			st Z, r16			
+
 			ldi ZH, high(RoundNum)
 			ldi ZL, low(RoundNum)
 			st Z, r16
@@ -257,6 +268,7 @@
 			st Z, r16
 
 			ldi r16, 1
+
 			ldi ZH, high(NewRound)
 			ldi ZL, low(NewRound)
 			st Z, r16
@@ -264,6 +276,12 @@
 			//Prevent reading bounces when game is reset using a push button
 			ldi ZH, high(PBDisable)
 			ldi ZL, low(PBDisable)
+			st Z, r16
+
+			ldi r16, 0xFF
+			
+			ldi ZH, high(PotOVFCountdown)
+			ldi ZL, low(PotOVFCountdown)
 			st Z, r16
 			
 		//Set up interrupts and timers
@@ -528,19 +546,53 @@
 		ldi YH, high(PotValue)
 		ldi YL, low(PotValue)
 
+		ldi XH, high(PotOVFCountdown)
+		ldi XL, low(PotOVFCountdown)
+		ldi r16, MS500
+		st X, r16
+
+		clr r16
+
+		ldi XH, high(PotCorrect)
+		ldi XL, low(PotCorrect)
+		st X, r16
+
+		ldi XH, high(PotRoundClear)
+		ldi XL, low(PotRoundClear)
+		st X, r16
+
 		ResetPotLoop:
 		//r16: time remaining
-		//r17: decimal digits of time remaining
-		
+			
+			ldi XH, high(PotRoundClear)
+			ldi XL, low(PotRoundClear)
+			ld r16, X
+			cpi r16, 1
+			breq FindPotScreen
+
 			//Check potentiometer
 			ADCRead
 			ld r17, Y
+//out portc, r17
 			cpi r17, 0
-			brne UpdateResetPotTimer
+			brne ResetPotWrongPos
+
+			ldi XH, high(PotCorrect)
+			ldi XL, low(PotCorrect)
+			ldi r16, 1
+			st X, r16
+			rjmp UpdateResetPotTimer
 			
-			
-			
-			
+			ResetPotWrongPos:
+				ldi XH, high(PotOVFCountdown)
+				ldi XL, low(PotOVFCountdown)
+				ldi r16, MS500
+				st X, r16
+
+				ldi XH, high(PotCorrect)
+				ldi XL, low(PotCorrect)
+				clr r16
+				st X, r16
 
 			UpdateResetPotTimer:
 				ld r16, Z
@@ -553,7 +605,7 @@
 				do_lcd_command CURSORL
 				call UpdateCD
 
-				rjmp ResetPotLoop
+			rjmp ResetPotLoop
 
 		
 
@@ -564,6 +616,8 @@
 		ldi ZL, low(Mode)
 		ldi r16, FINDPOTMODE
 		st Z, r16
+
+		
 
 	FindCodeScreen:
 		ldi ZH, high(Mode)
@@ -714,8 +768,6 @@
 		push r0
 		push r1
 		
-		
-
 		Tens:
 			divi r16, 10
 			mov r17, R0 //move result to register which subi works with
@@ -849,44 +901,72 @@
 		push r16
 		in r16, SREG
 		push r16
+		push r17
 		push ZH
 		push ZL
 		
-		//ldi ZH, high(Mode)
-		//ldi ZL, low(Mode)
-		//ld r16, Z
-		
-		//cpi r16
+		ldi ZH, high(Mode)
+		ldi ZL, low(Mode)
+		ld r16, Z
 
 		ldi ZH, high(CDOVFCount)
 		ldi ZL, low(CDOVFCount)
-		ld r16, Z
-		inc r16
-		st Z, r16
+		ld r17, Z
+		inc r17
+		st Z, r17
 
-		cpi r16, MS1000
+		cpi r17, MS1000
 		breq DecCDTime
 
 		T0AfterCD:
+
+		//Check if potentiometer is at correct position
+		ldi ZH, high(PotCorrect)
+		ldi ZL, low(PotCorrect)
+		ld r17, Z
+		cpi r17, 0
+		breq T0AfterPot
+		
+		//If potentiometer read is correct, count time held at correct position
+		ldi ZH, high(PotOVFCountdown)
+		ldi ZL, low(PotOVFCountdown)
+		ld r17, Z
+		dec r17
+		st Z, r17
+out portc, r17
+		cpi r17, 0
+		breq SetPotRoundClear
+		
+		T0AfterPot:
+
 		//More comparisions/counter increments
 		rjmp EndT0OVF
 
 		DecCDTime:
 			//Reset CDOVFCount
-			clr r16
-			st Z, r16
+			clr r17
+			st Z, r17
 			
 			ldi ZH, high(CurrentCDTime)
 			ldi ZL, low(CurrentCDTime)
-			ld r16, Z
-			dec r16
-			st Z, r16
+			ld r17, Z
+			dec r17
+			st Z, r17
 
 			rjmp T0AfterCD
 		
+		SetPotRoundClear:
+			ldi ZH, high(PotRoundClear)
+			ldi ZL, low(PotRoundClear)
+			ldi r17, 1
+			st Z, r17
+					
+			rjmp T0AfterPot
+
 		EndT0OVF:
 		pop ZL
 		pop ZH
+		pop r17
 		pop r16
 		out SREG, r16
 		pop r16	
