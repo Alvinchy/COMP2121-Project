@@ -105,6 +105,8 @@
 	.endmacro
 
 //Define Constants
+	
+	.equ NUMTOASCII		= 48 //Add this value to a number to convert it to ASCII
 
 	//Keypad related
 	.equ INITCOLMASK 	= 0xEF
@@ -140,9 +142,12 @@
 	Mode:		.BYTE 1	//Current screen
 	PBDisable:	.BYTE 1	//Disable push buttons (flag)
 	LastKey:	.BYTE 1	//Last key pressed on keypad
+	NewRound:	.BYTE 1 //Flag indicating if timer on potentiometer screens needs to be reset
 
 	//Timer dependent
 	PBDebounceTimer:	.BYTE 1 //Counts number of overflows of timer 2 before PBDisable flag is cleared
+	CurrentCDTime:		.BYTE 1 //Stores the current value of the countdown
+	CDOVFCount:			.BYTE 1 //Counts number of overflows of timer 0 for the operation of countdowns
 
 
 .CSEG
@@ -209,11 +214,24 @@
 			ldi ZH, high(PBDebounceTimer)
 			ldi ZL, low(PBDebounceTimer)
 			st Z, r16
+
+			ldi ZH, high(CurrentCDTime)
+			ldi ZL, low(CurrentCDTime)
+			st Z, r16
+
+			ldi ZH, high(CDOVFCount)
+			ldi ZL, low(CDOVFCount)
+			st Z, r16
 			
 			ldi r16, 20 //Default difficulty: easiest
 
 			ldi ZH, high(CDTime)
 			ldi ZL, low(CDTime)
+			st Z, r16
+
+			ldi r16, 1
+			ldi ZH, high(NewRound)
+			ldi ZL, low(NewRound)
 			st Z, r16
 			
 		//Set up interrupts and timers
@@ -226,9 +244,9 @@
 
 			//Timer 0
 			clr r16 //Normal timer operation
-			sts TCCR0A, r16 
+			out TCCR0A, r16 
 			ldi r16, (0b100 << CS00) //Prescaler 256
-			sts TCCR0B, r16
+			out TCCR0B, r16
 			ldi r16, (1 << TOIE0) //Enable timer 0 overflow interrupt
 			sts TIMSK0, r16
 
@@ -312,7 +330,7 @@
 		do_lcd_data_i 's'
 		do_lcd_data_i '1'
 
-		do_lcd_command 0b11000000 // shift cursor to beginning of 2nd line
+		do_lcd_command ROW2LCD // shift cursor to beginning of 2nd line
 
 		do_lcd_data_i 'S'
 		do_lcd_data_i 'a'
@@ -351,12 +369,117 @@
 		st Z, r16
 
 		do_lcd_command CLEARLCD
+
+		do_lcd_data_i '2'
+		do_lcd_data_i '1'
+		do_lcd_data_i '2'
+		do_lcd_data_i '1'
+		do_lcd_data_i ' '
+		do_lcd_data_i '1'
+		do_lcd_data_i '6'
+		do_lcd_data_i 's'
+		do_lcd_data_i '1'
+
+		do_lcd_command ROW2LCD
+
+		do_lcd_data_i 'S'
+		do_lcd_data_i 't'
+		do_lcd_data_i 'a'
+		do_lcd_data_i 'r'
+		do_lcd_data_i 't'
+		do_lcd_data_i 'i'
+		do_lcd_data_i 'n'
+		do_lcd_data_i 'g'
+		do_lcd_data_i ' '
+		do_lcd_data_i 'i'
+		do_lcd_data_i 'n'
+		do_lcd_data_i ' '
+		do_lcd_data_i '3'
+		do_lcd_data_i '.'
+		do_lcd_data_i '.'
+		do_lcd_data_i '.'
+
+		do_lcd_command CURSORL
+		do_lcd_command CURSORL
+		do_lcd_command CURSORL
+		do_lcd_command CURSORL
+		
+		//Reset timer
+		ldi ZH, high(CDOVFCount)
+		ldi ZL, low(CDOVFCount)
+		clr r16
+		st Z, r16
+		
+		//Initialise countdown
+		ldi ZH, high(CurrentCDTime)
+		ldi ZL, low(CurrentCDTime)
+		ldi r16, 3
+		st Z, r16
+
+		StartCDWait:
+			ld r16, Z
+			subi r16, -NUMTOASCII
+			do_lcd_data r16
+			do_lcd_command CURSORL
+			cpi r16, NUMTOASCII //If value is 0
+			breq ResetPotScreen
+			rjmp StartCDWait
+
 		
 	ResetPotScreen:
 		ldi ZH, high(Mode)
 		ldi ZL, low(Mode)
 		ldi r16, RESETPOTMODE
 		st Z, r16
+		
+		do_lcd_command CLEARLCD
+
+		do_lcd_data_i 'R'
+		do_lcd_data_i 'e'
+		do_lcd_data_i 's'
+		do_lcd_data_i 'e'
+		do_lcd_data_i 't'
+		do_lcd_data_i ' '
+		do_lcd_data_i 'P'
+		do_lcd_data_i 'O'
+		do_lcd_data_i 'T'
+		do_lcd_data_i ' '
+		do_lcd_data_i 't'
+		do_lcd_data_i 'o'
+		do_lcd_data_i ' '
+		do_lcd_data_i '0'
+
+		do_lcd_command ROW2LCD
+
+		do_lcd_data_i 'R'
+		do_lcd_data_i 'e'
+		do_lcd_data_i 'm'
+		do_lcd_data_i 'a'
+		do_lcd_data_i 'i'
+		do_lcd_data_i 'n'
+		do_lcd_data_i 'i'
+		do_lcd_data_i 'n'
+		do_lcd_data_i 'g'
+		do_lcd_data_i ':'
+		do_lcd_data_i ' '
+
+		ldi ZH, high(NewRound)
+		ldi ZL, low(NewRound)
+		ld r16, Z
+		cpi r16, 0
+		breq EndResetPotTimer
+		
+		//Clear the NewRound flag
+		clr r16
+		st Z, r16
+
+		ldi ZH, high(CDTime)
+		ldi ZL, low(CDTime)
+		ld r16, Z
+
+		EndResetPotTimer:
+		ldi ZH, high(CurrentCDTime)
+		ldi ZL, low(CurrentCDTime)
 
 	FindPotScreen:
 		ldi ZH, high(Mode)
@@ -400,8 +523,7 @@
 
 	//Output:
 	//r23 (Next Mode)
-	
-	
+		
 		push r16
 		push r17
 		push r18
@@ -460,7 +582,6 @@
 				do_lcd_command CURSORL
 				do_lcd_data_i 'X'
 				jmp EndKeyProcess
-
 
 	EndKeyProcess:
 		pop ZL
@@ -546,8 +667,51 @@
 		reti
 	
 	T0OVF:
+		push r16
+		in r16, SREG
+		push r16
+		push ZH
+		push ZL
+		
+		//ldi ZH, high(Mode)
+		//ldi ZL, low(Mode)
+		//ld r16, Z
+		
+		//cpi r16
 
-	reti
+		ldi ZH, high(CDOVFCount)
+		ldi ZL, low(CDOVFCount)
+		ld r16, Z
+		inc r16
+		st Z, r16
+
+		cpi r16, MS1000
+		breq DecCDTime
+
+		T0AfterCD:
+		//More comparisions/counter increments
+		rjmp EndT0OVF
+
+		DecCDTime:
+			//Reset CDOVFCount
+			clr r16
+			st Z, r16
+			
+			ldi ZH, high(CurrentCDTime)
+			ldi ZL, low(CurrentCDTime)
+			ld r16, Z
+			dec r16
+			st Z, r16
+
+			rjmp T0AfterCD
+		
+		EndT0OVF:
+		pop ZL
+		pop ZH
+		pop r16
+		out SREG, r16
+		pop r16	
+		reti
 
 
 	T2OVF:
