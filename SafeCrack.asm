@@ -182,6 +182,7 @@
 	CurrentCDTime:		.BYTE 1 //Stores the current value of the countdown
 	CDOVFCount:			.BYTE 1 //Counts number of overflows of timer 0 for the operation of countdowns
 	PotOVFCountdown:	.BYTE 1 //Counts number of overflows of timer 0 for a valid potentiometer read
+	StrobeOVFCount: 	.BYTE 1 //Counts number of overflows of timer 0 before the strobe needs to be toggled on the win screen
 
 
 .CSEG
@@ -259,6 +260,10 @@
 
 			ldi ZH, high(CDOVFCount)
 			ldi ZL, low(CDOVFCount)
+			st Z, r16
+
+			ldi ZH, high(StrobeOVFCount)
+			ldi ZL, low(StrobeOVFCount)
 			st Z, r16
 			
 			ldi r16, 20 //Default difficulty: easiest
@@ -363,7 +368,7 @@
 
 		//Enable global interrupts
 			sei
-
+jmp WINscreen
 	StartScreen:
 		ldi ZH, high(Mode)
 		ldi ZL, low(Mode)
@@ -781,8 +786,9 @@
 		ldi r16, FINDCODEMODE
 		st Z, r16
 
-		do_lcd_command CLEARLCD
-		rjmp FindCodeScreen
+		clr r16
+		out PORTC, r16
+		out PORTG, r16
 
 	EnterCodeScreen:
 		ldi ZH, high(Mode)
@@ -796,6 +802,35 @@
 		ldi r16, WINMODE
 		st Z, r16
 
+		do_lcd_command CLEARLCD
+		
+		do_lcd_data_i 'G'
+		do_lcd_data_i 'a'
+		do_lcd_data_i 'm'
+		do_lcd_data_i 'e'
+		do_lcd_data_i ' '
+		do_lcd_data_i 'c'
+		do_lcd_data_i 'o'
+		do_lcd_data_i 'm'
+		do_lcd_data_i 'p'
+		do_lcd_data_i 'l'
+		do_lcd_data_i 'e'
+		do_lcd_data_i 't'
+		do_lcd_data_i 'e'
+
+		do_lcd_command ROW2LCD
+
+		do_lcd_data_i 'Y'
+		do_lcd_data_i 'o'
+		do_lcd_data_i 'u'
+		do_lcd_data_i ' '
+		do_lcd_data_i 'W'
+		do_lcd_data_i 'i'
+		do_lcd_data_i 'n'
+		do_lcd_data_i '!'
+
+		ScanKeypad
+jmp winscreen
 	LoseScreen:
 		ldi ZH, high(Mode)
 		ldi ZL, low(Mode)
@@ -1017,7 +1052,6 @@
 		sei
 		jmp StartCDScreen
 		
-		
 		EndPB1Pressed:
 		pop ZL
 		pop ZH
@@ -1065,6 +1099,7 @@
 		in r16, SREG
 		push r16
 		push r17
+		push r18
 		push ZH
 		push ZL
 		
@@ -1101,6 +1136,17 @@
 		
 		T0AfterPot:
 
+		cpi r16, WINMODE
+		brne EndT0OVF
+
+		ldi ZH, high(StrobeOVFCount)
+		ldi ZL, low(StrobeOVFCount)
+		ld r17, Z
+		inc r17
+		st Z, r17
+		cpi r17, MS250
+		breq StrobeToggle
+
 		//More comparisions/counter increments
 		rjmp EndT0OVF
 
@@ -1125,9 +1171,21 @@
 					
 			rjmp T0AfterPot
 
+		StrobeToggle:
+			//Reset StrobeOVFCount
+			clr r17
+			st Z, r17
+
+			in r17, PORTE
+			ldi r18, (1 << 3)
+			eor r18, r17
+			out PORTE, r18
+
+
 		EndT0OVF:
 		pop ZL
 		pop ZH
+		pop r18
 		pop r17
 		pop r16
 		out SREG, r16
