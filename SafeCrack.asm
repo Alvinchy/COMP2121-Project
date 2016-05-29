@@ -667,7 +667,7 @@
 		ldi XH, high(PotTarget)
 		ldi XL, low(PotTarget)
 		ld r18, X
-out portc, r18
+
 		ldi XH, high(PotOVFCountdown)
 		ldi XL, low(PotOVFCountdown)
 		ldi r16, MS1000
@@ -684,19 +684,24 @@ out portc, r18
 		st X, r16
 
 		FindPotLoop:
-		//r16: time remaining
 			
 			ldi XH, high(PotRoundClear)
 			ldi XL, low(PotRoundClear)
 			ld r16, X
 			cpi r16, 1
-			breq FindCodeScreen	
+			brne FindPotReadADC
+			jmp FindCodeScreen	
 			
-			//Check potentiometer
+			FindPotReadADC:
 			ADCRead
 			ld r17, Y
 			cp r17, r18
 			brne FindPotWrongPos
+
+			ser r16
+			out PORTC, r16
+			ldi r16, 0b00000011
+			out PORTG, r16
 
 			ldi XH, high(PotCorrect)
 			ldi XL, low(PotCorrect)
@@ -705,8 +710,11 @@ out portc, r18
 			rjmp UpdateFindPotTimer
 			
 			FindPotWrongPos:
-				//Flags still set from cp r17,r18
+				//Flags still set from cp r17, r18
 				brlt PotLTTarget
+				clr r16
+				out PORTC, r16
+				out PORTG, r16
 				jmp ResetPotScreen
 				
 				PotLTTarget:
@@ -719,6 +727,39 @@ out portc, r18
 				ldi XL, low(PotCorrect)
 				clr r16
 				st X, r16
+				
+				//Check if within 32 raw ADC counts by ignoring least significant bit (values already set to +/- 16 raw counts)
+				mov r19, r17
+				andi r19, 0b11111110
+				mov r20, r18
+				andi r20, 0b11111110
+
+				cp r19, r20
+				breq Within32
+
+				//Check for within 48
+				//Since going over the value causes a return to previous screen, no need to check for if value is 48 higher than target
+				mov r19, r17
+				subi r19, -0b00000011
+				cp r18, r19
+				brlt Within48
+				
+				rjmp UpdateFindPotTimer
+
+				Within32:
+				ser r16
+				out PORTC, r16
+				ldi r16, 0b00000001
+				out PORTG, r16
+				rjmp UpdateFindPotTimer
+
+				Within48:
+				ser r16
+				out PORTC, r16
+				clr r16
+				out PORTG, r16
+				rjmp UpdateFindPotTimer
+
 
 			UpdateFindPotTimer:
 				ld r16, Z
@@ -740,6 +781,9 @@ out portc, r18
 		ldi r16, FINDCODEMODE
 		st Z, r16
 
+		do_lcd_command CLEARLCD
+		rjmp FindCodeScreen
+
 	EnterCodeScreen:
 		ldi ZH, high(Mode)
 		ldi ZL, low(Mode)
@@ -757,6 +801,10 @@ out portc, r18
 		ldi ZL, low(Mode)
 		ldi r16, LOSEMODE
 		st Z, r16
+
+		clr r16
+		out PORTC, r16
+		out PORTG, r16
 
 		do_lcd_command CLEARLCD
 		
