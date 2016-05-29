@@ -175,6 +175,7 @@
 	Mode:			.BYTE 1	//Current screen
 	PBDisable:		.BYTE 1	//Disable push buttons (flag)
 	LastKey:		.BYTE 1	//Last key pressed on keypad
+	KeyCorrect:		.BYTE 1 //Flag indicating if key pressed is correct
 	NewRound:		.BYTE 1 //Flag indicating if timer on potentiometer screens needs to be reset
 
 	//Timer dependent
@@ -183,6 +184,7 @@
 	CDOVFCount:			.BYTE 1 //Counts number of overflows of timer 0 for the operation of countdowns
 	PotOVFCountdown:	.BYTE 1 //Counts number of overflows of timer 0 for a valid potentiometer read
 	StrobeOVFCount: 	.BYTE 1 //Counts number of overflows of timer 0 before the strobe needs to be toggled on the win screen
+	KeyOVFCount:		.BYTE 1 //Counts number of overflows of timer 0 before the correct number is accepted and a new round entered
 
 
 .CSEG
@@ -250,6 +252,10 @@
 			ldi ZL, low(LastKey)
 			st Z, r16
 
+			ldi ZH, high(KeyCorrect)
+			ldi ZL, low(KeyCorrect)
+			st Z, r16
+
 			ldi ZH, high(PBDebounceTimer)
 			ldi ZL, low(PBDebounceTimer)
 			st Z, r16
@@ -264,6 +270,10 @@
 
 			ldi ZH, high(StrobeOVFCount)
 			ldi ZL, low(StrobeOVFCount)
+			st Z, r16
+
+			ldi ZH, high(KeyOVFCount)
+			ldi ZL, low(KeyOVFCount)
 			st Z, r16
 			
 			ldi r16, 20 //Default difficulty: easiest
@@ -785,10 +795,53 @@
 		ldi ZL, low(Mode)
 		ldi r16, FINDCODEMODE
 		st Z, r16
-
+		
 		clr r16
 		out PORTC, r16
 		out PORTG, r16
+
+		do_lcd_command CLEARLCD
+
+		do_lcd_data_i 'P'
+		do_lcd_data_i 'o'
+		do_lcd_data_i 's'
+		do_lcd_data_i 'i'
+		do_lcd_data_i 't'
+		do_lcd_data_i 'i'
+		do_lcd_data_i 'o'
+		do_lcd_data_i 'n'
+		do_lcd_data_i ' '
+		do_lcd_data_i 'F'
+		do_lcd_data_i 'o'
+		do_lcd_data_i 'u'
+		do_lcd_data_i 'n'
+		do_lcd_data_i 'd'
+		do_lcd_data_i '!'
+
+		do_lcd_command ROW2LCD
+
+		do_lcd_data_i 'S'
+		do_lcd_data_i 'c'
+		do_lcd_data_i 'a'
+		do_lcd_data_i 'n'
+		do_lcd_data_i ' '
+		do_lcd_data_i 'f'
+		do_lcd_data_i 'o'
+		do_lcd_data_i 'r'
+		do_lcd_data_i ' '
+		do_lcd_data_i 'n'
+		do_lcd_data_i 'u'
+		do_lcd_data_i 'm'
+		do_lcd_data_i 'b'
+		do_lcd_data_i 'e'
+		do_lcd_data_i 'r'
+
+		ldi ZH, high(KeyCorrect)
+		ldi ZL, low(KeyCorrect)
+		clr r16
+		st Z, r16
+
+		ScanKeypad
 
 	EnterCodeScreen:
 		ldi ZH, high(Mode)
