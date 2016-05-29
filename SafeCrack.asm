@@ -103,6 +103,16 @@
 			breq KeyWholeLoop
 			jmp KeyColLoop
 	.endmacro
+	.macro ADCRead
+		push r16
+		ldi r16, (3 << REFS0) | (0 << ADLAR) | (0 << MUX0)
+		sts ADMUX, r16
+		ldi r16, (1 << MUX5)
+		sts ADCSRB, r16
+		ldi r16, (1 << ADEN) | (1 << ADSC) | (1 << ADIE) | (5 << ADPS0)
+		sts ADCSRA, r16
+		pop r16
+	.endmacro
 
 //Define Constants
 	
@@ -136,7 +146,8 @@
 
 .DSEG
 	Code: 		.BYTE 3 //Correct code
-	PotTarget: 	.BYTE 2 //Potentiometer target
+	PotTarget: 	.BYTE 1 //Potentiometer target
+	PotValue:	.BYTE 1 //Potentiometer read
 	RoundNum: 	.BYTE 1 //Number of rounds played
 	CDTime:		.BYTE 1	//Countdown time
 	Mode:		.BYTE 1	//Current screen
@@ -167,8 +178,8 @@
 	.org OVF0ADDR
 	jmp T0OVF
 
-	//.org ADCADDR (Wrong)
-	//reti
+	.org ADCCADDR
+	jmp ADCComplete
 
 	.org OVF3ADDR
 	jmp T3OVF
@@ -310,7 +321,7 @@
 			do_lcd_command 0b00000001 // clear display
 			do_lcd_command 0b00000110 // increment, no display shift
 			do_lcd_command 0b00001110 // Cursor on, bar, no blink
-		
+
 		//Enable global interrupts
 			sei
 
@@ -480,6 +491,15 @@
 		EndResetPotTimer:
 		ldi ZH, high(CurrentCDTime)
 		ldi ZL, low(CurrentCDTime)
+
+		ldi YH, high(PotValue)
+		ldi YL, low(PotValue)
+
+		teapreadloop:
+		ADCRead
+		ld r17, Y
+		out portC, r17
+		rjmp teapreadloop
 
 	FindPotScreen:
 		ldi ZH, high(Mode)
@@ -666,6 +686,39 @@
 		pop r16	
 		reti
 	
+	ADCComplete:
+		push r16
+		in r16, SREG
+		push r16
+		push r17
+		push ZH
+		push ZL
+ 
+		lds r16, ADCL
+		lds r17, ADCH
+
+		//ADC >> 4 = ADC/16; gives value to compare to where equality is +/- 16 of actual value
+		lsr r17
+		ror r16
+		lsr r17
+		ror r16
+		lsr r17
+		ror r16
+		lsr r17
+		ror r16
+
+		ldi ZH, high(PotValue)
+		ldi ZL, low(PotValue)
+		st Z, r16
+
+		pop ZL
+		pop ZH
+		pop r17
+		pop r16
+		out SREG, r16
+		pop r16
+		reti
+
 	T0OVF:
 		push r16
 		in r16, SREG
