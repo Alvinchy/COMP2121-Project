@@ -368,7 +368,7 @@
 
 		//Enable global interrupts
 			sei
-jmp WINscreen
+
 	StartScreen:
 		ldi ZH, high(Mode)
 		ldi ZL, low(Mode)
@@ -735,9 +735,9 @@ jmp WINscreen
 				
 				//Check if within 32 raw ADC counts by ignoring least significant bit (values already set to +/- 16 raw counts)
 				mov r19, r17
-				andi r19, 0b11111110
+				lsr r19
 				mov r20, r18
-				andi r20, 0b11111110
+				lsr r20
 
 				cp r19, r20
 				breq Within32
@@ -830,7 +830,7 @@ jmp WINscreen
 		do_lcd_data_i '!'
 
 		ScanKeypad
-jmp winscreen
+
 	LoseScreen:
 		ldi ZH, high(Mode)
 		ldi ZL, low(Mode)
@@ -992,6 +992,113 @@ jmp winscreen
 		pop r16
 		ret
 
+	DIVW: //Divides word stored in r17:r16 by value in r18. Stores result in R0, and remainder in r17:r16. Assumed r18 <= 255
+		push r18
+		push r19
+	
+		clr r19
+		cp r19, r18 //Ignore dividing by 0
+
+		breq EndDivw
+
+		clr r0 //intialise r0
+
+		ContDivw:
+			cp r16, r18
+			cpc r17, r19
+			brlo EndDivw
+			sub r16, r18
+			sbc r17, r19
+			inc R0
+	
+			rjmp ContDivw
+	
+		EndDivw:
+		pop r19
+		pop r18
+		ret
+	
+	NumToKey: //Takes binary representation of a single decimal digit in r0 and returns the keypad code for it in CCCCRRRR form
+		push r16
+
+		mov r16, r0
+
+		cpi r16, 0
+		breq Key0
+
+		cpi r16, 1
+		breq Key1
+
+		cpi r16, 2
+		breq Key2
+
+		cpi r16, 3
+		breq Key3
+
+		cpi r16, 4
+		breq Key4
+
+		cpi r16, 5
+		breq Key5
+
+		cpi r16, 6
+		breq Key6
+
+		cpi r16, 7
+		breq Key7
+
+		cpi r16, 8
+		breq Key8
+
+		cpi r16, 9
+		breq Key9
+
+		Key0:
+		ldi r16, 0b0010_1000
+		rjmp EndNumToKey
+
+		Key1:
+		ldi r16, 0b0001_0001
+		rjmp EndNumToKey
+
+		Key2:
+		ldi r16, 0b0010_0001
+		rjmp EndNumToKey
+
+		Key3:
+		ldi r16, 0b0100_0001
+		rjmp EndNumToKey
+
+		Key4:
+		ldi r16, 0b0001_0010
+		rjmp EndNumToKey
+
+		Key5:
+		ldi r16, 0b0010_0010
+		rjmp EndNumToKey
+
+		Key6:
+		ldi r16, 0b0100_0010
+		rjmp EndNumToKey
+
+		Key7:
+		ldi r16, 0b0001_0100
+		rjmp EndNumToKey
+
+		Key8:
+		ldi r16, 0b0010_0100
+		rjmp EndNumToKey
+
+		Key9:
+		ldi r16, 0b0100_0100
+		rjmp EndNumToKey
+
+		EndNumToKey:
+		mov r0, r16
+
+		pop r16
+		ret
+
 	////////////////////////////////Interrupts////////////////////////////////
 	PB0Pressed:
 		jmp Reset
@@ -1008,8 +1115,10 @@ jmp winscreen
 		ldi ZL, low(PBDisable)
 		ld r16, Z
 		cpi r16, 1
-		breq EndPB1Pressed
-
+		brne PBEnabled
+		jmp EndPB1Pressed
+		
+		PBEnabled:
 		ldi r16, 1
 		st Z, r16
 
@@ -1041,6 +1150,51 @@ jmp winscreen
 		pop r16
 		out SREG, r16
 		pop r16
+		
+		ldi r18, low(1000)
+		ldi r19, high(1000)	
+		
+		//Determines a random 3 digit code based on timer 1 and 2
+		lds r16, TCNT0
+		lds r17, TCNT2
+
+		//Crop from 16 to 10 bits (max 1024)
+		lsr r17
+		ror r16
+		lsr r17
+		ror r16
+		lsr r17
+		ror r16
+		lsr r17
+		ror r16
+		lsr r17
+		ror r16
+		lsr r17
+		ror r16
+
+		cp r16, r18
+		cpc r17, r19
+		brlt StoreRandom
+		subi r16, 24
+		
+		StoreRandom:
+			ldi ZH, high(Code)
+			ldi ZL, low(Code)
+
+			ldi r18, 100
+			call divw
+			call NumToKey
+			st Z+, r0
+
+			ldi r18, 10
+			call divw
+			call NumToKey
+			st Z+, r0
+
+			mov r0, r16
+			call NumToKey
+			st Z+, r16	
+
 		
 		//reti increments SP by 2 and enables interrupts
 		in r16, SPL
@@ -1207,7 +1361,7 @@ jmp winscreen
 		st Z, r16
 
 		//Count to 8 = 1ms
-		cpi r16, 200
+		cpi r16, 240
 		brne EndT2OVF //Skip if 25ms have not elapsed
 
 		clr r16
