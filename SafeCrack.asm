@@ -512,6 +512,8 @@
 		do_lcd_data_i 'g'
 		do_lcd_data_i ':'
 		do_lcd_data_i ' '
+		do_lcd_data_i ' '
+		do_lcd_data_i ' '
 
 		ldi ZH, high(NewRound)
 		ldi ZL, low(NewRound)
@@ -519,47 +521,58 @@
 		cpi r16, 0
 		breq EndResetPotTimer
 		
-		//Clear the NewRound flag
-		clr r16
-		st Z, r16
+			//Clear the NewRound flag
+			clr r16
+			st Z, r16
 
-		//Reset Timer
-		ldi ZH, high(CDOVFCount)
-		ldi ZL, low(CDOVFCount)
-		clr r16
-		st Z, r16
+			//Reset Timer
+			ldi ZH, high(CDOVFCount)
+			ldi ZL, low(CDOVFCount)
+			clr r16
+			st Z, r16
 		
-		//Set countdown time
-		ldi ZH, high(CDTime)
-		ldi ZL, low(CDTime)
-		ld r16, Z
-		ldi ZH, high(CurrentCDTime)
-		ldi ZL, low(CurrentCDTime)
-		st Z, r16
-		
-		call UpdateCD
+			//Set countdown time
+			ldi ZH, high(CDTime)
+			ldi ZL, low(CDTime)
+			ld r16, Z
+			ldi ZH, high(CurrentCDTime)
+			ldi ZL, low(CurrentCDTime)
+			st Z, r16
+			
+			do_lcd_command CURSORL
+			do_lcd_command CURSORL
+			call UpdateCD
+
+			//Determine potentiometer target from timer 2
+			ldi ZH, high(PotTarget)
+			ldi ZL, low(PotTarget)
+			lds r16, TCNT2
+			//Potentiometer is 6 bit value
+			lsr r16
+			lsr r16
+			st Z, r16
 
 		EndResetPotTimer:
-		ldi ZH, high(CurrentCDTime)
-		ldi ZL, low(CurrentCDTime)
+			ldi ZH, high(CurrentCDTime)
+			ldi ZL, low(CurrentCDTime)
 
-		ldi YH, high(PotValue)
-		ldi YL, low(PotValue)
+			ldi YH, high(PotValue)
+			ldi YL, low(PotValue)
 
-		ldi XH, high(PotOVFCountdown)
-		ldi XL, low(PotOVFCountdown)
-		ldi r16, MS500
-		st X, r16
+			ldi XH, high(PotOVFCountdown)
+			ldi XL, low(PotOVFCountdown)
+			ldi r16, MS500
+			st X, r16
 
-		clr r16
+			clr r16
 
-		ldi XH, high(PotCorrect)
-		ldi XL, low(PotCorrect)
-		st X, r16
+			ldi XH, high(PotCorrect)
+			ldi XL, low(PotCorrect)
+			st X, r16
 
-		ldi XH, high(PotRoundClear)
-		ldi XL, low(PotRoundClear)
-		st X, r16
+			ldi XH, high(PotRoundClear)
+			ldi XL, low(PotRoundClear)
+			st X, r16
 
 		ResetPotLoop:
 		//r16: time remaining
@@ -573,7 +586,6 @@
 			//Check potentiometer
 			ADCRead
 			ld r17, Y
-//out portc, r17
 			cpi r17, 0
 			brne ResetPotWrongPos
 
@@ -607,17 +619,120 @@
 
 			rjmp ResetPotLoop
 
-		
-
-		
 
 	FindPotScreen:
 		ldi ZH, high(Mode)
 		ldi ZL, low(Mode)
 		ldi r16, FINDPOTMODE
 		st Z, r16
-
 		
+		do_lcd_command CLEARLCD
+
+		do_lcd_data_i 'F'
+		do_lcd_data_i 'i'
+		do_lcd_data_i 'n'
+		do_lcd_data_i 'd'
+		do_lcd_data_i ' '
+		do_lcd_data_i 'P'
+		do_lcd_data_i 'O'
+		do_lcd_data_i 'T'
+		do_lcd_data_i ' '
+		do_lcd_data_i 'P'
+		do_lcd_data_i 'o'
+		do_lcd_data_i 's'
+
+		do_lcd_command ROW2LCD
+
+		do_lcd_data_i 'R'
+		do_lcd_data_i 'e'
+		do_lcd_data_i 'm'
+		do_lcd_data_i 'a'
+		do_lcd_data_i 'i'
+		do_lcd_data_i 'n'
+		do_lcd_data_i 'i'
+		do_lcd_data_i 'n'
+		do_lcd_data_i 'g'
+		do_lcd_data_i ':'
+		do_lcd_data_i ' '
+		do_lcd_data_i ' '
+		do_lcd_data_i ' '
+		
+		ldi ZH, high(CurrentCDTime)
+		ldi ZL, low(CurrentCDTime)
+
+		ldi YH, high(PotValue)
+		ldi YL, low(PotValue)
+		
+		//r18 stores potentiometer target
+		ldi XH, high(PotTarget)
+		ldi XL, low(PotTarget)
+		ld r18, X
+out portc, r18
+		ldi XH, high(PotOVFCountdown)
+		ldi XL, low(PotOVFCountdown)
+		ldi r16, MS1000
+		st X, r16
+
+		clr r16
+
+		ldi XH, high(PotCorrect)
+		ldi XL, low(PotCorrect)
+		st X, r16
+
+		ldi XH, high(PotRoundClear)
+		ldi XL, low(PotRoundClear)
+		st X, r16
+
+		FindPotLoop:
+		//r16: time remaining
+			
+			ldi XH, high(PotRoundClear)
+			ldi XL, low(PotRoundClear)
+			ld r16, X
+			cpi r16, 1
+			breq FindCodeScreen	
+			
+			//Check potentiometer
+			ADCRead
+			ld r17, Y
+			cp r17, r18
+			brne FindPotWrongPos
+
+			ldi XH, high(PotCorrect)
+			ldi XL, low(PotCorrect)
+			ldi r16, 1
+			st X, r16
+			rjmp UpdateFindPotTimer
+			
+			FindPotWrongPos:
+				//Flags still set from cp r17,r18
+				brlt PotLTTarget
+				jmp ResetPotScreen
+				
+				PotLTTarget:
+				ldi XH, high(PotOVFCountdown)
+				ldi XL, low(PotOVFCountdown)
+				ldi r16, MS1000
+				st X, r16
+
+				ldi XH, high(PotCorrect)
+				ldi XL, low(PotCorrect)
+				clr r16
+				st X, r16
+
+			UpdateFindPotTimer:
+				ld r16, Z
+				cpi r16, 0
+				brne FindPotCDContinue //Check for game over
+				jmp LoseScreen
+				
+				FindPotCDContinue:
+				do_lcd_command CURSORL
+				do_lcd_command CURSORL
+				call UpdateCD
+
+			rjmp FindPotLoop
+
 
 	FindCodeScreen:
 		ldi ZH, high(Mode)
@@ -933,7 +1048,6 @@
 		ld r17, Z
 		dec r17
 		st Z, r17
-out portc, r17
 		cpi r17, 0
 		breq SetPotRoundClear
 		
