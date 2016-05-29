@@ -103,6 +103,36 @@
 			breq KeyWholeLoop
 			jmp KeyColLoop
 	.endmacro
+	.macro ADCRead
+		push r16
+		ldi r16, (3 << REFS0) | (0 << ADLAR) | (0 << MUX0)
+		sts ADMUX, r16
+		ldi r16, (1 << MUX5)
+		sts ADCSRB, r16
+		ldi r16, (1 << ADEN) | (1 << ADSC) | (1 << ADIE) | (5 << ADPS0)
+		sts ADCSRA, r16
+		pop r16
+	.endmacro
+	.macro divi //format: divi Rd, k; Rd/k : stores remainder in Rd result in R0
+		push r16
+		//mov R0, @0
+		clr r16
+		cpi r16, @1 //Ignore dividing by 0
+		pop r16
+		breq EndDivi
+
+		clr R0 //intialise r0
+
+		ContDivi:
+		cpi @0, @1
+		brlo EndDivi
+		subi @0, @1
+		inc R0
+	
+		rjmp ContDivi
+	
+		EndDivi:
+	.endmacro
 
 //Define Constants
 	
@@ -135,19 +165,24 @@
 	.equ MS250			= 61
 
 .DSEG
-	Code: 		.BYTE 3 //Correct code
-	PotTarget: 	.BYTE 2 //Potentiometer target
-	RoundNum: 	.BYTE 1 //Number of rounds played
-	CDTime:		.BYTE 1	//Countdown time
-	Mode:		.BYTE 1	//Current screen
-	PBDisable:	.BYTE 1	//Disable push buttons (flag)
-	LastKey:	.BYTE 1	//Last key pressed on keypad
-	NewRound:	.BYTE 1 //Flag indicating if timer on potentiometer screens needs to be reset
+	Code: 			.BYTE 3 //Correct code
+	PotTarget: 		.BYTE 1 //Potentiometer target
+	PotValue:		.BYTE 1 //Potentiometer read
+	PotCorrect:		.BYTE 1 //Flag indicating if the potentiometer position is correct
+	PotRoundClear:	.BYTE 1 //Flag indicating if the potentiometer round has been successfully cleared
+	RoundNum: 		.BYTE 1 //Number of rounds played
+	CDTime:			.BYTE 1	//Countdown time
+	Mode:			.BYTE 1	//Current screen
+	PBDisable:		.BYTE 1	//Disable push buttons (flag)
+	LastKey:		.BYTE 1	//Last key pressed on keypad
+	NewRound:		.BYTE 1 //Flag indicating if timer on potentiometer screens needs to be reset
 
 	//Timer dependent
 	PBDebounceTimer:	.BYTE 1 //Counts number of overflows of timer 2 before PBDisable flag is cleared
 	CurrentCDTime:		.BYTE 1 //Stores the current value of the countdown
 	CDOVFCount:			.BYTE 1 //Counts number of overflows of timer 0 for the operation of countdowns
+	PotOVFCountdown:	.BYTE 1 //Counts number of overflows of timer 0 for a valid potentiometer read
+	StrobeOVFCount: 	.BYTE 1 //Counts number of overflows of timer 0 before the strobe needs to be toggled on the win screen
 
 
 .CSEG
@@ -167,8 +202,8 @@
 	.org OVF0ADDR
 	jmp T0OVF
 
-	//.org ADCADDR (Wrong)
-	//reti
+	.org ADCCADDR
+	jmp ADCComplete
 
 	.org OVF3ADDR
 	jmp T3OVF
@@ -194,17 +229,21 @@
 			ldi ZH, high(PotTarget)
 			ldi ZL, low(PotTarget)
 			st Z, r16
+		
+			ldi ZH, high(PotCorrect)
+			ldi ZL, low(PotCorrect)
+			st Z, r16
 			
+			ldi ZH, high(PotRoundClear)
+			ldi ZL, low(PotRoundClear)
+			st Z, r16			
+
 			ldi ZH, high(RoundNum)
 			ldi ZL, low(RoundNum)
 			st Z, r16
 
 			ldi ZH, high(Mode)
 			ldi ZL, low(Mode)
-			st Z, r16
-			
-			ldi ZH, high(PBDisable)
-			ldi ZL, low(PBDisable)
 			st Z, r16
 
 			ldi ZH, high(LastKey)
@@ -222,6 +261,10 @@
 			ldi ZH, high(CDOVFCount)
 			ldi ZL, low(CDOVFCount)
 			st Z, r16
+
+			ldi ZH, high(StrobeOVFCount)
+			ldi ZL, low(StrobeOVFCount)
+			st Z, r16
 			
 			ldi r16, 20 //Default difficulty: easiest
 
@@ -230,8 +273,20 @@
 			st Z, r16
 
 			ldi r16, 1
+
 			ldi ZH, high(NewRound)
 			ldi ZL, low(NewRound)
+			st Z, r16
+			
+			//Prevent reading bounces when game is reset using a push button
+			ldi ZH, high(PBDisable)
+			ldi ZL, low(PBDisable)
+			st Z, r16
+
+			ldi r16, 0xFF
+			
+			ldi ZH, high(PotOVFCountdown)
+			ldi ZL, low(PotOVFCountdown)
 			st Z, r16
 			
 		//Set up interrupts and timers
@@ -310,10 +365,10 @@
 			do_lcd_command 0b00000001 // clear display
 			do_lcd_command 0b00000110 // increment, no display shift
 			do_lcd_command 0b00001110 // Cursor on, bar, no blink
-		
+
 		//Enable global interrupts
 			sei
-
+jmp WINscreen
 	StartScreen:
 		ldi ZH, high(Mode)
 		ldi ZL, low(Mode)
@@ -462,6 +517,8 @@
 		do_lcd_data_i 'g'
 		do_lcd_data_i ':'
 		do_lcd_data_i ' '
+		do_lcd_data_i ' '
+		do_lcd_data_i ' '
 
 		ldi ZH, high(NewRound)
 		ldi ZL, low(NewRound)
@@ -469,29 +526,269 @@
 		cpi r16, 0
 		breq EndResetPotTimer
 		
-		//Clear the NewRound flag
-		clr r16
-		st Z, r16
+			//Clear the NewRound flag
+			clr r16
+			st Z, r16
 
-		ldi ZH, high(CDTime)
-		ldi ZL, low(CDTime)
-		ld r16, Z
+			//Reset Timer
+			ldi ZH, high(CDOVFCount)
+			ldi ZL, low(CDOVFCount)
+			clr r16
+			st Z, r16
+		
+			//Set countdown time
+			ldi ZH, high(CDTime)
+			ldi ZL, low(CDTime)
+			ld r16, Z
+			ldi ZH, high(CurrentCDTime)
+			ldi ZL, low(CurrentCDTime)
+			st Z, r16
+			
+			do_lcd_command CURSORL
+			do_lcd_command CURSORL
+			call UpdateCD
+
+			//Determine potentiometer target from timer 2
+			ldi ZH, high(PotTarget)
+			ldi ZL, low(PotTarget)
+			lds r16, TCNT2
+			//Potentiometer is 6 bit value
+			lsr r16
+			lsr r16
+			st Z, r16
 
 		EndResetPotTimer:
-		ldi ZH, high(CurrentCDTime)
-		ldi ZL, low(CurrentCDTime)
+			ldi ZH, high(CurrentCDTime)
+			ldi ZL, low(CurrentCDTime)
+
+			ldi YH, high(PotValue)
+			ldi YL, low(PotValue)
+
+			ldi XH, high(PotOVFCountdown)
+			ldi XL, low(PotOVFCountdown)
+			ldi r16, MS500
+			st X, r16
+
+			clr r16
+
+			ldi XH, high(PotCorrect)
+			ldi XL, low(PotCorrect)
+			st X, r16
+
+			ldi XH, high(PotRoundClear)
+			ldi XL, low(PotRoundClear)
+			st X, r16
+
+		ResetPotLoop:
+		//r16: time remaining
+			
+			ldi XH, high(PotRoundClear)
+			ldi XL, low(PotRoundClear)
+			ld r16, X
+			cpi r16, 1
+			breq FindPotScreen
+
+			//Check potentiometer
+			ADCRead
+			ld r17, Y
+			cpi r17, 0
+			brne ResetPotWrongPos
+
+			ldi XH, high(PotCorrect)
+			ldi XL, low(PotCorrect)
+			ldi r16, 1
+			st X, r16
+			rjmp UpdateResetPotTimer
+			
+			ResetPotWrongPos:
+				ldi XH, high(PotOVFCountdown)
+				ldi XL, low(PotOVFCountdown)
+				ldi r16, MS500
+				st X, r16
+
+				ldi XH, high(PotCorrect)
+				ldi XL, low(PotCorrect)
+				clr r16
+				st X, r16
+
+			UpdateResetPotTimer:
+				ld r16, Z
+				cpi r16, 0
+				brne ResetPotCDContinue //Check for game over
+				jmp LoseScreen
+				
+				ResetPotCDContinue:
+				do_lcd_command CURSORL
+				do_lcd_command CURSORL
+				call UpdateCD
+
+			rjmp ResetPotLoop
+
 
 	FindPotScreen:
 		ldi ZH, high(Mode)
 		ldi ZL, low(Mode)
 		ldi r16, FINDPOTMODE
 		st Z, r16
+		
+		do_lcd_command CLEARLCD
+
+		do_lcd_data_i 'F'
+		do_lcd_data_i 'i'
+		do_lcd_data_i 'n'
+		do_lcd_data_i 'd'
+		do_lcd_data_i ' '
+		do_lcd_data_i 'P'
+		do_lcd_data_i 'O'
+		do_lcd_data_i 'T'
+		do_lcd_data_i ' '
+		do_lcd_data_i 'P'
+		do_lcd_data_i 'o'
+		do_lcd_data_i 's'
+
+		do_lcd_command ROW2LCD
+
+		do_lcd_data_i 'R'
+		do_lcd_data_i 'e'
+		do_lcd_data_i 'm'
+		do_lcd_data_i 'a'
+		do_lcd_data_i 'i'
+		do_lcd_data_i 'n'
+		do_lcd_data_i 'i'
+		do_lcd_data_i 'n'
+		do_lcd_data_i 'g'
+		do_lcd_data_i ':'
+		do_lcd_data_i ' '
+		do_lcd_data_i ' '
+		do_lcd_data_i ' '
+		
+		ldi ZH, high(CurrentCDTime)
+		ldi ZL, low(CurrentCDTime)
+
+		ldi YH, high(PotValue)
+		ldi YL, low(PotValue)
+		
+		//r18 stores potentiometer target
+		ldi XH, high(PotTarget)
+		ldi XL, low(PotTarget)
+		ld r18, X
+
+		ldi XH, high(PotOVFCountdown)
+		ldi XL, low(PotOVFCountdown)
+		ldi r16, MS1000
+		st X, r16
+
+		clr r16
+
+		ldi XH, high(PotCorrect)
+		ldi XL, low(PotCorrect)
+		st X, r16
+
+		ldi XH, high(PotRoundClear)
+		ldi XL, low(PotRoundClear)
+		st X, r16
+
+		FindPotLoop:
+			
+			ldi XH, high(PotRoundClear)
+			ldi XL, low(PotRoundClear)
+			ld r16, X
+			cpi r16, 1
+			brne FindPotReadADC
+			jmp FindCodeScreen	
+			
+			FindPotReadADC:
+			ADCRead
+			ld r17, Y
+			cp r17, r18
+			brne FindPotWrongPos
+
+			ser r16
+			out PORTC, r16
+			ldi r16, 0b00000011
+			out PORTG, r16
+
+			ldi XH, high(PotCorrect)
+			ldi XL, low(PotCorrect)
+			ldi r16, 1
+			st X, r16
+			rjmp UpdateFindPotTimer
+			
+			FindPotWrongPos:
+				//Flags still set from cp r17, r18
+				brlt PotLTTarget
+				clr r16
+				out PORTC, r16
+				out PORTG, r16
+				jmp ResetPotScreen
+				
+				PotLTTarget:
+				ldi XH, high(PotOVFCountdown)
+				ldi XL, low(PotOVFCountdown)
+				ldi r16, MS1000
+				st X, r16
+
+				ldi XH, high(PotCorrect)
+				ldi XL, low(PotCorrect)
+				clr r16
+				st X, r16
+				
+				//Check if within 32 raw ADC counts by ignoring least significant bit (values already set to +/- 16 raw counts)
+				mov r19, r17
+				andi r19, 0b11111110
+				mov r20, r18
+				andi r20, 0b11111110
+
+				cp r19, r20
+				breq Within32
+
+				//Check for within 48
+				//Since going over the value causes a return to previous screen, no need to check for if value is 48 higher than target
+				mov r19, r17
+				subi r19, -0b00000011
+				cp r18, r19
+				brlt Within48
+				
+				rjmp UpdateFindPotTimer
+
+				Within32:
+				ser r16
+				out PORTC, r16
+				ldi r16, 0b00000001
+				out PORTG, r16
+				rjmp UpdateFindPotTimer
+
+				Within48:
+				ser r16
+				out PORTC, r16
+				clr r16
+				out PORTG, r16
+				rjmp UpdateFindPotTimer
+
+
+			UpdateFindPotTimer:
+				ld r16, Z
+				cpi r16, 0
+				brne FindPotCDContinue //Check for game over
+				jmp LoseScreen
+				
+				FindPotCDContinue:
+				do_lcd_command CURSORL
+				do_lcd_command CURSORL
+				call UpdateCD
+
+			rjmp FindPotLoop
+
 
 	FindCodeScreen:
 		ldi ZH, high(Mode)
 		ldi ZL, low(Mode)
 		ldi r16, FINDCODEMODE
 		st Z, r16
+
+		clr r16
+		out PORTC, r16
+		out PORTG, r16
 
 	EnterCodeScreen:
 		ldi ZH, high(Mode)
@@ -505,11 +802,70 @@
 		ldi r16, WINMODE
 		st Z, r16
 
+		do_lcd_command CLEARLCD
+		
+		do_lcd_data_i 'G'
+		do_lcd_data_i 'a'
+		do_lcd_data_i 'm'
+		do_lcd_data_i 'e'
+		do_lcd_data_i ' '
+		do_lcd_data_i 'c'
+		do_lcd_data_i 'o'
+		do_lcd_data_i 'm'
+		do_lcd_data_i 'p'
+		do_lcd_data_i 'l'
+		do_lcd_data_i 'e'
+		do_lcd_data_i 't'
+		do_lcd_data_i 'e'
+
+		do_lcd_command ROW2LCD
+
+		do_lcd_data_i 'Y'
+		do_lcd_data_i 'o'
+		do_lcd_data_i 'u'
+		do_lcd_data_i ' '
+		do_lcd_data_i 'W'
+		do_lcd_data_i 'i'
+		do_lcd_data_i 'n'
+		do_lcd_data_i '!'
+
+		ScanKeypad
+jmp winscreen
 	LoseScreen:
 		ldi ZH, high(Mode)
 		ldi ZL, low(Mode)
 		ldi r16, LOSEMODE
 		st Z, r16
+
+		clr r16
+		out PORTC, r16
+		out PORTG, r16
+
+		do_lcd_command CLEARLCD
+		
+		do_lcd_data_i 'G'
+		do_lcd_data_i 'a'
+		do_lcd_data_i 'm'
+		do_lcd_data_i 'e'
+		do_lcd_data_i ' '
+		do_lcd_data_i 'O'
+		do_lcd_data_i 'v'
+		do_lcd_data_i 'e'
+		do_lcd_data_i 'r'
+
+		do_lcd_command ROW2LCD
+
+		do_lcd_data_i 'Y'
+		do_lcd_data_i 'o'
+		do_lcd_data_i 'u'
+		do_lcd_data_i ' '
+		do_lcd_data_i 'L'
+		do_lcd_data_i 'o'
+		do_lcd_data_i 's'
+		do_lcd_data_i 'e'
+		do_lcd_data_i '!'
+
+		ScanKeypad
 
 	//Endless loop to halt operation
 	LOOP:
@@ -537,7 +893,14 @@
 	//Determine which mode
 		cpi r22, STARTMODE
 		breq KeyStartMode
-		//cpi r22, 
+
+		cpi r22, LOSEMODE
+		breq KeypadReset
+		cpi r22, WINMODE
+		breq KeypadReset
+
+		KeypadReset:
+			jmp Reset
 
 		KeyStartMode:
 			ldi r23, 0xFF //Pressing a keypad button does not exit the start screen
@@ -583,18 +946,51 @@
 				do_lcd_data_i 'X'
 				jmp EndKeyProcess
 
-	EndKeyProcess:
-		pop ZL
-		pop ZH
-		pop r22
-		pop r21
-		pop r20
-		pop r19
-		pop r18
+		EndKeyProcess:
+			pop ZL
+			pop ZH
+			pop r22
+			pop r21
+			pop r20
+			pop r19
+			pop r18
+			pop r17
+			pop r16
+			ret
+
+	UpdateCD:
+	//Input: CDTime in r16
+	//Output: Changes display of countdown time on LCD
+		push r16
+		push r17
+		push r0
+		push r1
+		
+		Tens:
+			divi r16, 10
+			mov r17, R0 //move result to register which subi works with
+			subi r17, -NumToASCII
+			cpi r17, NumToASCII
+			breq LT10 //Write a space in tens place if result is less than 10
+
+			do_lcd_data r17
+			rjmp Ones
+
+			LT10:
+				do_lcd_data_i ' '
+	
+		Ones:
+			divi r16, 1
+			mov r17, R0 //move result to register which subi works with
+			subi r17, -NumToASCII
+			do_lcd_data r17
+		
+		EndUpdateCD:
+		pop r1
+		pop r0
 		pop r17
 		pop r16
 		ret
-
 
 	////////////////////////////////Interrupts////////////////////////////////
 	PB0Pressed:
@@ -656,7 +1052,6 @@
 		sei
 		jmp StartCDScreen
 		
-		
 		EndPB1Pressed:
 		pop ZL
 		pop ZH
@@ -666,48 +1061,132 @@
 		pop r16	
 		reti
 	
+	ADCComplete:
+		push r16
+		in r16, SREG
+		push r16
+		push r17
+		push ZH
+		push ZL
+ 
+		lds r16, ADCL
+		lds r17, ADCH
+
+		//ADC >> 4 = ADC/16; gives value to compare to where equality is +/- 16 of actual value
+		lsr r17
+		ror r16
+		lsr r17
+		ror r16
+		lsr r17
+		ror r16
+		lsr r17
+		ror r16
+
+		ldi ZH, high(PotValue)
+		ldi ZL, low(PotValue)
+		st Z, r16
+
+		pop ZL
+		pop ZH
+		pop r17
+		pop r16
+		out SREG, r16
+		pop r16
+		reti
+
 	T0OVF:
 		push r16
 		in r16, SREG
 		push r16
+		push r17
+		push r18
 		push ZH
 		push ZL
 		
-		//ldi ZH, high(Mode)
-		//ldi ZL, low(Mode)
-		//ld r16, Z
-		
-		//cpi r16
+		ldi ZH, high(Mode)
+		ldi ZL, low(Mode)
+		ld r16, Z
 
 		ldi ZH, high(CDOVFCount)
 		ldi ZL, low(CDOVFCount)
-		ld r16, Z
-		inc r16
-		st Z, r16
+		ld r17, Z
+		inc r17
+		st Z, r17
 
-		cpi r16, MS1000
+		cpi r17, MS1000
 		breq DecCDTime
 
 		T0AfterCD:
+
+		//Check if potentiometer is at correct position
+		ldi ZH, high(PotCorrect)
+		ldi ZL, low(PotCorrect)
+		ld r17, Z
+		cpi r17, 0
+		breq T0AfterPot
+		
+		//If potentiometer read is correct, count time held at correct position
+		ldi ZH, high(PotOVFCountdown)
+		ldi ZL, low(PotOVFCountdown)
+		ld r17, Z
+		dec r17
+		st Z, r17
+		cpi r17, 0
+		breq SetPotRoundClear
+		
+		T0AfterPot:
+
+		cpi r16, WINMODE
+		brne EndT0OVF
+
+		ldi ZH, high(StrobeOVFCount)
+		ldi ZL, low(StrobeOVFCount)
+		ld r17, Z
+		inc r17
+		st Z, r17
+		cpi r17, MS250
+		breq StrobeToggle
+
 		//More comparisions/counter increments
 		rjmp EndT0OVF
 
 		DecCDTime:
 			//Reset CDOVFCount
-			clr r16
-			st Z, r16
+			clr r17
+			st Z, r17
 			
 			ldi ZH, high(CurrentCDTime)
 			ldi ZL, low(CurrentCDTime)
-			ld r16, Z
-			dec r16
-			st Z, r16
+			ld r17, Z
+			dec r17
+			st Z, r17
 
 			rjmp T0AfterCD
 		
+		SetPotRoundClear:
+			ldi ZH, high(PotRoundClear)
+			ldi ZL, low(PotRoundClear)
+			ldi r17, 1
+			st Z, r17
+					
+			rjmp T0AfterPot
+
+		StrobeToggle:
+			//Reset StrobeOVFCount
+			clr r17
+			st Z, r17
+
+			in r17, PORTE
+			ldi r18, (1 << 3)
+			eor r18, r17
+			out PORTE, r18
+
+
 		EndT0OVF:
 		pop ZL
 		pop ZH
+		pop r18
+		pop r17
 		pop r16
 		out SREG, r16
 		pop r16	

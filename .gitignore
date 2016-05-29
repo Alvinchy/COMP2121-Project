@@ -4,3 +4,4 @@ SafeCrack.map
 AvrBuild.bat
 *.tmp
 *.bat
+*.aws
