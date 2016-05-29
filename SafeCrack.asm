@@ -4,22 +4,22 @@
 	.macro do_lcd_command
 		push r16
 		ldi r16, @0
-		rcall lcd_command
-		rcall lcd_wait
+		call lcd_command
+		call lcd_wait
 		pop r16
 	.endmacro
 	.macro do_lcd_data
 		push r16
 		mov r16, @0
-		rcall lcd_data
-		rcall lcd_wait
+		call lcd_data
+		call lcd_wait
 		pop r16
 	.endmacro
 	.macro do_lcd_data_i
 		push r16
 		ldi r16, @0
-		rcall lcd_data
-		rcall lcd_wait
+		call lcd_data
+		call lcd_wait
 		pop r16
 	.endmacro
 	.macro ScanKeypad //cannot place in function; loop terminated by button, ret would cause issues in stack
@@ -78,9 +78,10 @@
 			breq KeyProcessFin
 
 			cpi r23, RESETPOTMODE
-			brne KeyProcessFin
+			brne CheckEnterCodeMode
 			jmp ResetPotScreen
-
+			
+			CheckEnterCodeMode:
 			cpi r23, ENTERCODEMODE
 			brne KeyProcessFin
 			jmp EnterCodeScreen
@@ -528,6 +529,12 @@
 		andi r16, 0b11011111
 		out PORTE, r16
 		
+		//Clear flag
+		ldi ZH, high(KeyCorrect)
+		ldi ZL, low(KeyCorrect)
+		clr r16
+		st Z, r16
+		
 		do_lcd_command CLEARLCD
 
 		do_lcd_data_i 'R'
@@ -886,6 +893,27 @@
 		andi r16, 0b11011111
 		out PORTE, r16
 
+		//Clear flag
+		ldi ZH, high(KeyCorrect)
+		ldi ZL, low(KeyCorrect)
+		clr r16
+		st Z, r16
+		
+		do_lcd_command CLEARLCD
+
+		do_lcd_data_i 'E'
+		do_lcd_data_i 'n'
+		do_lcd_data_i 't'
+		do_lcd_data_i 'e'
+		do_lcd_data_i 'r'
+		do_lcd_data_i ' '
+		do_lcd_data_i 'C'
+		do_lcd_data_i 'o'
+		do_lcd_data_i 'd'
+		do_lcd_data_i 'e'
+		
+		do_lcd_command ROW2LCD
+
 	WinScreen:
 		ldi ZH, high(Mode)
 		ldi ZL, low(Mode)
@@ -1049,7 +1077,7 @@
 			ldi ZH, high(RoundNum)
 			ldi ZL, low(RoundNum)
 			ld r17, Z
-			
+
 			//Determine correct digit for the round
 			ldi ZH, high(Code)
 			ldi ZL, low(Code)
@@ -1058,8 +1086,6 @@
 			adc ZH, r17
 			
 			ld r16, Z
-
-
 			cp r20, r16
 			breq FoundCorrect
 			
@@ -1099,11 +1125,13 @@
 				ld r18, Z
 				
 				cpi r18, 0
-				brne EndKeyProcess
+				breq EndKeyProcess
 				
 				ldi ZH, high(RoundNum)
 				ldi ZL, low(RoundNum)
 				ld r18, Z
+				inc r18
+				st Z, r18
 				
 				cpi r18, 3
 				breq GoToEnterCodeMode
@@ -1362,8 +1390,7 @@
 
 			mov r0, r16
 			call NumToKey
-			st Z+, r16	
-
+			st Z+, r0
 		
 		//reti increments SP by 2 and enables interrupts
 		in r16, SPL
@@ -1517,14 +1544,8 @@
 			ldi ZL, low(NewRound)
 			ldi r17, 1
 			st Z, r17
-
-			ldi ZH, high(RoundNum)
-			ldi ZL, low(RoundNum)
-			ld r17, Z
-			inc r17
-			st Z, r17
 					
-			rjmp T0AfterPot
+			rjmp T0AfterFindCode
 
 		StrobeToggle:
 			//Reset StrobeOVFCount
