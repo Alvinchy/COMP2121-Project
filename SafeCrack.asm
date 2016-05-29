@@ -76,14 +76,22 @@
 
 			cpi r23, 0xFF
 			breq KeyProcessFin
+
 			cpi r23, RESETPOTMODE
+			brne KeyProcessFin
 			jmp ResetPotScreen
+
 			cpi r23, ENTERCODEMODE
+			brne KeyProcessFin
 			jmp EnterCodeScreen
 			
-
 		KeyProcessFin:
 			ldi r19, KEYRESETCOUNT
+			cpi r22, FINDCODEMODE
+			brne KeyNextRow
+			st Z, r19 //Stores 0 in LastKey to read a continuous press when in find code mode
+			ldi r19, KEYRESETCOUNT
+
 
 		KeyNextRow:
 			lsl r16
@@ -94,6 +102,24 @@
 
 			st Z, r19 //Stores 0 in LastKey so that any following key press is valid
 			ldi r19, KEYRESETCOUNT
+			
+			//Disable motor
+			in r24, PORTE
+			andi r24, 0b11011111
+			out PORTE, r24
+			
+			clr r24
+
+			//Reset correct key flag
+			ldi YH, high(KeyCorrect)
+			ldi YL, low(KeyCorrect)
+			st Y, r24
+
+			//Reset correct key timer
+			ldi YH, high(KeyOVFCount)
+			ldi YL, low(KeyOVFCount)
+			st Y, r24
+
 			jmp KeyRowLoop
 
 		KeyNextCol:
@@ -366,9 +392,9 @@
 
 		//Set up LCD
 			do_lcd_command 0b00111000 // 2x5x7
-			rcall sleep_5ms
+			call sleep_5ms
 			do_lcd_command 0b00111000 // 2x5x7
-			rcall sleep_1ms
+			call sleep_1ms
 			do_lcd_command 0b00111000 // 2x5x7
 			do_lcd_command 0b00111000 // 2x5x7
 			do_lcd_command 0b00001000 // display off?
@@ -496,6 +522,11 @@
 		ldi ZL, low(Mode)
 		ldi r16, RESETPOTMODE
 		st Z, r16
+
+		//Disable motor
+		in r16, PORTE
+		andi r16, 0b11011111
+		out PORTE, r16
 		
 		do_lcd_command CLEARLCD
 
@@ -796,6 +827,7 @@
 		ldi r16, FINDCODEMODE
 		st Z, r16
 		
+		//Turn off LED bar
 		clr r16
 		out PORTC, r16
 		out PORTG, r16
@@ -848,6 +880,11 @@
 		ldi ZL, low(Mode)
 		ldi r16, ENTERCODEMODE
 		st Z, r16
+
+		//Disable motor
+		in r16, PORTE
+		andi r16, 0b11011111
+		out PORTE, r16
 
 	WinScreen:
 		ldi ZH, high(Mode)
@@ -947,6 +984,12 @@
 		cpi r22, STARTMODE
 		breq KeyStartMode
 
+		cpi r22, FINDCODEMODE
+		brne KeyNotFindCode
+		jmp KeyFindCodeMode
+		
+		KeyNotFindCode:
+
 		cpi r22, LOSEMODE
 		breq KeypadReset
 		cpi r22, WINMODE
@@ -954,6 +997,7 @@
 
 		KeypadReset:
 			jmp Reset
+
 
 		KeyStartMode:
 			ldi r23, 0xFF //Pressing a keypad button does not exit the start screen
@@ -998,6 +1042,78 @@
 				do_lcd_command CURSORL
 				do_lcd_data_i 'X'
 				jmp EndKeyProcess
+
+		KeyFindCodeMode:
+			ldi r23, 0xFF //Default return; timers will indicate if mode needs to be changed
+			
+			ldi ZH, high(RoundNum)
+			ldi ZL, low(RoundNum)
+			ld r17, Z
+			
+			//Determine correct digit for the round
+			ldi ZH, high(Code)
+			ldi ZL, low(Code)
+			add ZL, r17
+			clr r17
+			adc ZH, r17
+			
+			ld r16, Z
+
+
+			cp r20, r16
+			breq FoundCorrect
+			
+				//Disable motor
+				in r18, PORTE
+				andi r18, 0b11011111
+				out PORTE, r18
+			
+				clr r18
+
+				//Reset correct key flag
+				ldi ZH, high(KeyCorrect)
+				ldi ZL, low(KeyCorrect)
+				st Z, r18
+
+				//Reset correct key timer
+				ldi ZH, high(KeyOVFCount)
+				ldi ZL, low(KeyOVFCount)
+				st Z, r18
+
+				rjmp EndKeyProcess
+
+			FoundCorrect:
+				//Enable motor
+				in r18, PORTE
+				ori r18, 0b00100000
+				out PORTE, r18
+
+				//Set correct key flag
+				ldi ZH, high(KeyCorrect)
+				ldi ZL, low(KeyCorrect)
+				ldi r18, 1
+				st Z, r18
+
+				ldi ZH, high(NewRound)
+				ldi ZL, low(NewRound)
+				ld r18, Z
+				
+				cpi r18, 0
+				brne EndKeyProcess
+				
+				ldi ZH, high(RoundNum)
+				ldi ZL, low(RoundNum)
+				ld r18, Z
+				
+				cpi r18, 3
+				breq GoToEnterCodeMode
+				
+				ldi r23, RESETPOTMODE
+				rjmp EndKeyProcess
+
+				GoToEnterCodeMode:
+				ldi r23, ENTERCODEMODE
+				rjmp EndKeyProcess
 
 		EndKeyProcess:
 			pop ZL
@@ -1343,6 +1459,24 @@
 		
 		T0AfterPot:
 
+		//Check if correct key is pressed
+		ldi ZH, high(KeyCorrect)
+		ldi ZL, low(KeyCorrect)
+		ld r17, Z
+		cpi r17, 0
+		breq T0AfterFindCode
+		
+		//If key pressed is correct, count time held at correct position
+		ldi ZH, high(KeyOVFCount)
+		ldi ZL, low(KeyOVFCount)
+		ld r17, Z
+		inc r17
+		st Z, r17
+		cpi r17, MS1000
+		breq SetKeyRoundClear
+
+		T0AfterFindCode:
+
 		cpi r16, WINMODE
 		brne EndT0OVF
 
@@ -1374,6 +1508,20 @@
 			ldi ZH, high(PotRoundClear)
 			ldi ZL, low(PotRoundClear)
 			ldi r17, 1
+			st Z, r17
+					
+			rjmp T0AfterPot
+		
+		SetKeyRoundClear:
+			ldi ZH, high(NewRound)
+			ldi ZL, low(NewRound)
+			ldi r17, 1
+			st Z, r17
+
+			ldi ZH, high(RoundNum)
+			ldi ZL, low(RoundNum)
+			ld r17, Z
+			inc r17
 			st Z, r17
 					
 			rjmp T0AfterPot
