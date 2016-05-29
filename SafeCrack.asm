@@ -113,6 +113,26 @@
 		sts ADCSRA, r16
 		pop r16
 	.endmacro
+	.macro divi //format: divi Rd, k; Rd/k : stores remainder in Rd result in R0
+		push r16
+		//mov R0, @0
+		clr r16
+		cpi r16, @1 //Ignore dividing by 0
+		pop r16
+		breq EndDivi
+
+		clr R0 //intialise r0
+
+		ContDivi:
+		cpi @0, @1
+		brlo EndDivi
+		subi @0, @1
+		inc R0
+	
+		rjmp ContDivi
+	
+		EndDivi:
+	.endmacro
 
 //Define Constants
 	
@@ -213,10 +233,6 @@
 			ldi ZH, high(Mode)
 			ldi ZL, low(Mode)
 			st Z, r16
-			
-			ldi ZH, high(PBDisable)
-			ldi ZL, low(PBDisable)
-			st Z, r16
 
 			ldi ZH, high(LastKey)
 			ldi ZL, low(LastKey)
@@ -243,6 +259,11 @@
 			ldi r16, 1
 			ldi ZH, high(NewRound)
 			ldi ZL, low(NewRound)
+			st Z, r16
+			
+			//Prevent reading bounces when game is reset using a push button
+			ldi ZH, high(PBDisable)
+			ldi ZL, low(PBDisable)
 			st Z, r16
 			
 		//Set up interrupts and timers
@@ -484,9 +505,21 @@
 		clr r16
 		st Z, r16
 
+		//Reset Timer
+		ldi ZH, high(CDOVFCount)
+		ldi ZL, low(CDOVFCount)
+		clr r16
+		st Z, r16
+		
+		//Set countdown time
 		ldi ZH, high(CDTime)
 		ldi ZL, low(CDTime)
 		ld r16, Z
+		ldi ZH, high(CurrentCDTime)
+		ldi ZL, low(CurrentCDTime)
+		st Z, r16
+		
+		call UpdateCD
 
 		EndResetPotTimer:
 		ldi ZH, high(CurrentCDTime)
@@ -495,11 +528,36 @@
 		ldi YH, high(PotValue)
 		ldi YL, low(PotValue)
 
-		teapreadloop:
-		ADCRead
-		ld r17, Y
-		out portC, r17
-		rjmp teapreadloop
+		ResetPotLoop:
+		//r16: time remaining
+		//r17: decimal digits of time remaining
+		
+			//Check potentiometer
+			ADCRead
+			ld r17, Y
+			cpi r17, 0
+			brne UpdateResetPotTimer
+			
+			
+			
+			
+
+			UpdateResetPotTimer:
+				ld r16, Z
+				cpi r16, 0
+				brne ResetPotCDContinue //Check for game over
+				jmp LoseScreen
+				
+				ResetPotCDContinue:
+				do_lcd_command CURSORL
+				do_lcd_command CURSORL
+				call UpdateCD
+
+				rjmp ResetPotLoop
+
+		
+
+		
 
 	FindPotScreen:
 		ldi ZH, high(Mode)
@@ -531,6 +589,32 @@
 		ldi r16, LOSEMODE
 		st Z, r16
 
+		do_lcd_command CLEARLCD
+		
+		do_lcd_data_i 'G'
+		do_lcd_data_i 'a'
+		do_lcd_data_i 'm'
+		do_lcd_data_i 'e'
+		do_lcd_data_i ' '
+		do_lcd_data_i 'O'
+		do_lcd_data_i 'v'
+		do_lcd_data_i 'e'
+		do_lcd_data_i 'r'
+
+		do_lcd_command ROW2LCD
+
+		do_lcd_data_i 'Y'
+		do_lcd_data_i 'o'
+		do_lcd_data_i 'u'
+		do_lcd_data_i ' '
+		do_lcd_data_i 'L'
+		do_lcd_data_i 'o'
+		do_lcd_data_i 's'
+		do_lcd_data_i 'e'
+		do_lcd_data_i '!'
+
+		ScanKeypad
+
 	//Endless loop to halt operation
 	LOOP:
 		rjmp LOOP
@@ -557,7 +641,14 @@
 	//Determine which mode
 		cpi r22, STARTMODE
 		breq KeyStartMode
-		//cpi r22, 
+
+		cpi r22, LOSEMODE
+		breq KeypadReset
+		cpi r22, WINMODE
+		breq KeypadReset
+
+		KeypadReset:
+			jmp Reset
 
 		KeyStartMode:
 			ldi r23, 0xFF //Pressing a keypad button does not exit the start screen
@@ -603,18 +694,53 @@
 				do_lcd_data_i 'X'
 				jmp EndKeyProcess
 
-	EndKeyProcess:
-		pop ZL
-		pop ZH
-		pop r22
-		pop r21
-		pop r20
-		pop r19
-		pop r18
+		EndKeyProcess:
+			pop ZL
+			pop ZH
+			pop r22
+			pop r21
+			pop r20
+			pop r19
+			pop r18
+			pop r17
+			pop r16
+			ret
+
+	UpdateCD:
+	//Input: CDTime in r16
+	//Output: Changes display of countdown time on LCD
+		push r16
+		push r17
+		push r0
+		push r1
+		
+		
+
+		Tens:
+			divi r16, 10
+			mov r17, R0 //move result to register which subi works with
+			subi r17, -NumToASCII
+			cpi r17, NumToASCII
+			breq LT10 //Write a space in tens place if result is less than 10
+
+			do_lcd_data r17
+			rjmp Ones
+
+			LT10:
+				do_lcd_data_i ' '
+	
+		Ones:
+			divi r16, 1
+			mov r17, R0 //move result to register which subi works with
+			subi r17, -NumToASCII
+			do_lcd_data r17
+		
+		EndUpdateCD:
+		pop r1
+		pop r0
 		pop r17
 		pop r16
 		ret
-
 
 	////////////////////////////////Interrupts////////////////////////////////
 	PB0Pressed:
