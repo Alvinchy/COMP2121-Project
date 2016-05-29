@@ -4,22 +4,22 @@
 	.macro do_lcd_command
 		push r16
 		ldi r16, @0
-		rcall lcd_command
-		rcall lcd_wait
+		call lcd_command
+		call lcd_wait
 		pop r16
 	.endmacro
 	.macro do_lcd_data
 		push r16
 		mov r16, @0
-		rcall lcd_data
-		rcall lcd_wait
+		call lcd_data
+		call lcd_wait
 		pop r16
 	.endmacro
 	.macro do_lcd_data_i
 		push r16
 		ldi r16, @0
-		rcall lcd_data
-		rcall lcd_wait
+		call lcd_data
+		call lcd_wait
 		pop r16
 	.endmacro
 	.macro ScanKeypad //cannot place in function; loop terminated by button, ret would cause issues in stack
@@ -76,14 +76,23 @@
 
 			cpi r23, 0xFF
 			breq KeyProcessFin
+
 			cpi r23, RESETPOTMODE
+			brne CheckEnterCodeMode
 			jmp ResetPotScreen
+			
+			CheckEnterCodeMode:
 			cpi r23, ENTERCODEMODE
+			brne KeyProcessFin
 			jmp EnterCodeScreen
 			
-
 		KeyProcessFin:
 			ldi r19, KEYRESETCOUNT
+			cpi r22, FINDCODEMODE
+			brne KeyNextRow
+			st Z, r19 //Stores 0 in LastKey to read a continuous press when in find code mode
+			ldi r19, KEYRESETCOUNT
+
 
 		KeyNextRow:
 			lsl r16
@@ -94,6 +103,24 @@
 
 			st Z, r19 //Stores 0 in LastKey so that any following key press is valid
 			ldi r19, KEYRESETCOUNT
+			
+			//Disable motor
+			in r24, PORTE
+			andi r24, 0b11011111
+			out PORTE, r24
+			
+			clr r24
+
+			//Reset correct key flag
+			ldi YH, high(KeyCorrect)
+			ldi YL, low(KeyCorrect)
+			st Y, r24
+
+			//Reset correct key timer
+			ldi YH, high(KeyOVFCount)
+			ldi YL, low(KeyOVFCount)
+			st Y, r24
+
 			jmp KeyRowLoop
 
 		KeyNextCol:
@@ -175,6 +202,7 @@
 	Mode:			.BYTE 1	//Current screen
 	PBDisable:		.BYTE 1	//Disable push buttons (flag)
 	LastKey:		.BYTE 1	//Last key pressed on keypad
+	KeyCorrect:		.BYTE 1 //Flag indicating if key pressed is correct
 	NewRound:		.BYTE 1 //Flag indicating if timer on potentiometer screens needs to be reset
 
 	//Timer dependent
@@ -183,6 +211,7 @@
 	CDOVFCount:			.BYTE 1 //Counts number of overflows of timer 0 for the operation of countdowns
 	PotOVFCountdown:	.BYTE 1 //Counts number of overflows of timer 0 for a valid potentiometer read
 	StrobeOVFCount: 	.BYTE 1 //Counts number of overflows of timer 0 before the strobe needs to be toggled on the win screen
+	KeyOVFCount:		.BYTE 1 //Counts number of overflows of timer 0 before the correct number is accepted and a new round entered
 
 
 .CSEG
@@ -250,6 +279,10 @@
 			ldi ZL, low(LastKey)
 			st Z, r16
 
+			ldi ZH, high(KeyCorrect)
+			ldi ZL, low(KeyCorrect)
+			st Z, r16
+
 			ldi ZH, high(PBDebounceTimer)
 			ldi ZL, low(PBDebounceTimer)
 			st Z, r16
@@ -264,6 +297,10 @@
 
 			ldi ZH, high(StrobeOVFCount)
 			ldi ZL, low(StrobeOVFCount)
+			st Z, r16
+
+			ldi ZH, high(KeyOVFCount)
+			ldi ZL, low(KeyOVFCount)
 			st Z, r16
 			
 			ldi r16, 20 //Default difficulty: easiest
@@ -356,9 +393,9 @@
 
 		//Set up LCD
 			do_lcd_command 0b00111000 // 2x5x7
-			rcall sleep_5ms
+			call sleep_5ms
 			do_lcd_command 0b00111000 // 2x5x7
-			rcall sleep_1ms
+			call sleep_1ms
 			do_lcd_command 0b00111000 // 2x5x7
 			do_lcd_command 0b00111000 // 2x5x7
 			do_lcd_command 0b00001000 // display off?
@@ -368,7 +405,7 @@
 
 		//Enable global interrupts
 			sei
-jmp WINscreen
+
 	StartScreen:
 		ldi ZH, high(Mode)
 		ldi ZL, low(Mode)
@@ -485,6 +522,17 @@ jmp WINscreen
 		ldi ZH, high(Mode)
 		ldi ZL, low(Mode)
 		ldi r16, RESETPOTMODE
+		st Z, r16
+
+		//Disable motor
+		in r16, PORTE
+		andi r16, 0b11011111
+		out PORTE, r16
+		
+		//Clear flag
+		ldi ZH, high(KeyCorrect)
+		ldi ZL, low(KeyCorrect)
+		clr r16
 		st Z, r16
 		
 		do_lcd_command CLEARLCD
@@ -735,9 +783,9 @@ jmp WINscreen
 				
 				//Check if within 32 raw ADC counts by ignoring least significant bit (values already set to +/- 16 raw counts)
 				mov r19, r17
-				andi r19, 0b11111110
+				lsr r19
 				mov r20, r18
-				andi r20, 0b11111110
+				lsr r20
 
 				cp r19, r20
 				breq Within32
@@ -785,16 +833,86 @@ jmp WINscreen
 		ldi ZL, low(Mode)
 		ldi r16, FINDCODEMODE
 		st Z, r16
-
+		
+		//Turn off LED bar
 		clr r16
 		out PORTC, r16
 		out PORTG, r16
+
+		do_lcd_command CLEARLCD
+
+		do_lcd_data_i 'P'
+		do_lcd_data_i 'o'
+		do_lcd_data_i 's'
+		do_lcd_data_i 'i'
+		do_lcd_data_i 't'
+		do_lcd_data_i 'i'
+		do_lcd_data_i 'o'
+		do_lcd_data_i 'n'
+		do_lcd_data_i ' '
+		do_lcd_data_i 'F'
+		do_lcd_data_i 'o'
+		do_lcd_data_i 'u'
+		do_lcd_data_i 'n'
+		do_lcd_data_i 'd'
+		do_lcd_data_i '!'
+
+		do_lcd_command ROW2LCD
+
+		do_lcd_data_i 'S'
+		do_lcd_data_i 'c'
+		do_lcd_data_i 'a'
+		do_lcd_data_i 'n'
+		do_lcd_data_i ' '
+		do_lcd_data_i 'f'
+		do_lcd_data_i 'o'
+		do_lcd_data_i 'r'
+		do_lcd_data_i ' '
+		do_lcd_data_i 'n'
+		do_lcd_data_i 'u'
+		do_lcd_data_i 'm'
+		do_lcd_data_i 'b'
+		do_lcd_data_i 'e'
+		do_lcd_data_i 'r'
+
+		ldi ZH, high(KeyCorrect)
+		ldi ZL, low(KeyCorrect)
+		clr r16
+		st Z, r16
+
+		ScanKeypad
 
 	EnterCodeScreen:
 		ldi ZH, high(Mode)
 		ldi ZL, low(Mode)
 		ldi r16, ENTERCODEMODE
 		st Z, r16
+
+		//Disable motor
+		in r16, PORTE
+		andi r16, 0b11011111
+		out PORTE, r16
+
+		//Clear flag
+		ldi ZH, high(KeyCorrect)
+		ldi ZL, low(KeyCorrect)
+		clr r16
+		st Z, r16
+		
+		do_lcd_command CLEARLCD
+
+		do_lcd_data_i 'E'
+		do_lcd_data_i 'n'
+		do_lcd_data_i 't'
+		do_lcd_data_i 'e'
+		do_lcd_data_i 'r'
+		do_lcd_data_i ' '
+		do_lcd_data_i 'C'
+		do_lcd_data_i 'o'
+		do_lcd_data_i 'd'
+		do_lcd_data_i 'e'
+		
+		do_lcd_command ROW2LCD
 
 	WinScreen:
 		ldi ZH, high(Mode)
@@ -830,7 +948,7 @@ jmp WINscreen
 		do_lcd_data_i '!'
 
 		ScanKeypad
-jmp winscreen
+
 	LoseScreen:
 		ldi ZH, high(Mode)
 		ldi ZL, low(Mode)
@@ -894,6 +1012,12 @@ jmp winscreen
 		cpi r22, STARTMODE
 		breq KeyStartMode
 
+		cpi r22, FINDCODEMODE
+		brne KeyNotFindCode
+		jmp KeyFindCodeMode
+		
+		KeyNotFindCode:
+
 		cpi r22, LOSEMODE
 		breq KeypadReset
 		cpi r22, WINMODE
@@ -901,6 +1025,7 @@ jmp winscreen
 
 		KeypadReset:
 			jmp Reset
+
 
 		KeyStartMode:
 			ldi r23, 0xFF //Pressing a keypad button does not exit the start screen
@@ -945,6 +1070,78 @@ jmp winscreen
 				do_lcd_command CURSORL
 				do_lcd_data_i 'X'
 				jmp EndKeyProcess
+
+		KeyFindCodeMode:
+			ldi r23, 0xFF //Default return; timers will indicate if mode needs to be changed
+			
+			ldi ZH, high(RoundNum)
+			ldi ZL, low(RoundNum)
+			ld r17, Z
+
+			//Determine correct digit for the round
+			ldi ZH, high(Code)
+			ldi ZL, low(Code)
+			add ZL, r17
+			clr r17
+			adc ZH, r17
+			
+			ld r16, Z
+			cp r20, r16
+			breq FoundCorrect
+			
+				//Disable motor
+				in r18, PORTE
+				andi r18, 0b11011111
+				out PORTE, r18
+			
+				clr r18
+
+				//Reset correct key flag
+				ldi ZH, high(KeyCorrect)
+				ldi ZL, low(KeyCorrect)
+				st Z, r18
+
+				//Reset correct key timer
+				ldi ZH, high(KeyOVFCount)
+				ldi ZL, low(KeyOVFCount)
+				st Z, r18
+
+				rjmp EndKeyProcess
+
+			FoundCorrect:
+				//Enable motor
+				in r18, PORTE
+				ori r18, 0b00100000
+				out PORTE, r18
+
+				//Set correct key flag
+				ldi ZH, high(KeyCorrect)
+				ldi ZL, low(KeyCorrect)
+				ldi r18, 1
+				st Z, r18
+
+				ldi ZH, high(NewRound)
+				ldi ZL, low(NewRound)
+				ld r18, Z
+				
+				cpi r18, 0
+				breq EndKeyProcess
+				
+				ldi ZH, high(RoundNum)
+				ldi ZL, low(RoundNum)
+				ld r18, Z
+				inc r18
+				st Z, r18
+				
+				cpi r18, 3
+				breq GoToEnterCodeMode
+				
+				ldi r23, RESETPOTMODE
+				rjmp EndKeyProcess
+
+				GoToEnterCodeMode:
+				ldi r23, ENTERCODEMODE
+				rjmp EndKeyProcess
 
 		EndKeyProcess:
 			pop ZL
@@ -992,6 +1189,113 @@ jmp winscreen
 		pop r16
 		ret
 
+	DIVW: //Divides word stored in r17:r16 by value in r18. Stores result in R0, and remainder in r17:r16. Assumed r18 <= 255
+		push r18
+		push r19
+	
+		clr r19
+		cp r19, r18 //Ignore dividing by 0
+
+		breq EndDivw
+
+		clr r0 //intialise r0
+
+		ContDivw:
+			cp r16, r18
+			cpc r17, r19
+			brlo EndDivw
+			sub r16, r18
+			sbc r17, r19
+			inc R0
+	
+			rjmp ContDivw
+	
+		EndDivw:
+		pop r19
+		pop r18
+		ret
+	
+	NumToKey: //Takes binary representation of a single decimal digit in r0 and returns the keypad code for it in CCCCRRRR form
+		push r16
+
+		mov r16, r0
+
+		cpi r16, 0
+		breq Key0
+
+		cpi r16, 1
+		breq Key1
+
+		cpi r16, 2
+		breq Key2
+
+		cpi r16, 3
+		breq Key3
+
+		cpi r16, 4
+		breq Key4
+
+		cpi r16, 5
+		breq Key5
+
+		cpi r16, 6
+		breq Key6
+
+		cpi r16, 7
+		breq Key7
+
+		cpi r16, 8
+		breq Key8
+
+		cpi r16, 9
+		breq Key9
+
+		Key0:
+		ldi r16, 0b0010_1000
+		rjmp EndNumToKey
+
+		Key1:
+		ldi r16, 0b0001_0001
+		rjmp EndNumToKey
+
+		Key2:
+		ldi r16, 0b0010_0001
+		rjmp EndNumToKey
+
+		Key3:
+		ldi r16, 0b0100_0001
+		rjmp EndNumToKey
+
+		Key4:
+		ldi r16, 0b0001_0010
+		rjmp EndNumToKey
+
+		Key5:
+		ldi r16, 0b0010_0010
+		rjmp EndNumToKey
+
+		Key6:
+		ldi r16, 0b0100_0010
+		rjmp EndNumToKey
+
+		Key7:
+		ldi r16, 0b0001_0100
+		rjmp EndNumToKey
+
+		Key8:
+		ldi r16, 0b0010_0100
+		rjmp EndNumToKey
+
+		Key9:
+		ldi r16, 0b0100_0100
+		rjmp EndNumToKey
+
+		EndNumToKey:
+		mov r0, r16
+
+		pop r16
+		ret
+
 	////////////////////////////////Interrupts////////////////////////////////
 	PB0Pressed:
 		jmp Reset
@@ -1008,8 +1312,10 @@ jmp winscreen
 		ldi ZL, low(PBDisable)
 		ld r16, Z
 		cpi r16, 1
-		breq EndPB1Pressed
-
+		brne PBEnabled
+		jmp EndPB1Pressed
+		
+		PBEnabled:
 		ldi r16, 1
 		st Z, r16
 
@@ -1041,6 +1347,50 @@ jmp winscreen
 		pop r16
 		out SREG, r16
 		pop r16
+		
+		ldi r18, low(1000)
+		ldi r19, high(1000)	
+		
+		//Determines a random 3 digit code based on timer 1 and 2
+		lds r16, TCNT0
+		lds r17, TCNT2
+
+		//Crop from 16 to 10 bits (max 1024)
+		lsr r17
+		ror r16
+		lsr r17
+		ror r16
+		lsr r17
+		ror r16
+		lsr r17
+		ror r16
+		lsr r17
+		ror r16
+		lsr r17
+		ror r16
+
+		cp r16, r18
+		cpc r17, r19
+		brlt StoreRandom
+		subi r16, 24
+		
+		StoreRandom:
+			ldi ZH, high(Code)
+			ldi ZL, low(Code)
+
+			ldi r18, 100
+			call divw
+			call NumToKey
+			st Z+, r0
+
+			ldi r18, 10
+			call divw
+			call NumToKey
+			st Z+, r0
+
+			mov r0, r16
+			call NumToKey
+			st Z+, r0
 		
 		//reti increments SP by 2 and enables interrupts
 		in r16, SPL
@@ -1136,6 +1486,24 @@ jmp winscreen
 		
 		T0AfterPot:
 
+		//Check if correct key is pressed
+		ldi ZH, high(KeyCorrect)
+		ldi ZL, low(KeyCorrect)
+		ld r17, Z
+		cpi r17, 0
+		breq T0AfterFindCode
+		
+		//If key pressed is correct, count time held at correct position
+		ldi ZH, high(KeyOVFCount)
+		ldi ZL, low(KeyOVFCount)
+		ld r17, Z
+		inc r17
+		st Z, r17
+		cpi r17, MS1000
+		breq SetKeyRoundClear
+
+		T0AfterFindCode:
+
 		cpi r16, WINMODE
 		brne EndT0OVF
 
@@ -1170,6 +1538,14 @@ jmp winscreen
 			st Z, r17
 					
 			rjmp T0AfterPot
+		
+		SetKeyRoundClear:
+			ldi ZH, high(NewRound)
+			ldi ZL, low(NewRound)
+			ldi r17, 1
+			st Z, r17
+					
+			rjmp T0AfterFindCode
 
 		StrobeToggle:
 			//Reset StrobeOVFCount
@@ -1207,7 +1583,7 @@ jmp winscreen
 		st Z, r16
 
 		//Count to 8 = 1ms
-		cpi r16, 200
+		cpi r16, 240
 		brne EndT2OVF //Skip if 25ms have not elapsed
 
 		clr r16
