@@ -83,8 +83,13 @@
 			
 			CheckEnterCodeMode:
 			cpi r23, ENTERCODEMODE
-			brne KeyProcessFin
+			brne CheckWinMode
 			jmp EnterCodeScreen
+
+			CheckWinMode:
+			cpi r23, WINMODE
+			brne KeyProcessFin
+			jmp WinScreen
 			
 		KeyProcessFin:
 			ldi r19, KEYRESETCOUNT
@@ -893,10 +898,16 @@
 		andi r16, 0b11011111
 		out PORTE, r16
 
+		clr r16
+		
 		//Clear flag
 		ldi ZH, high(KeyCorrect)
 		ldi ZL, low(KeyCorrect)
-		clr r16
+		st Z, r16
+		
+		//Reset round number to keep track of which digit is correct
+		ldi ZH, high(RoundNum)
+		ldi ZL, low(RoundNum)
 		st Z, r16
 		
 		do_lcd_command CLEARLCD
@@ -913,6 +924,8 @@
 		do_lcd_data_i 'e'
 		
 		do_lcd_command ROW2LCD
+
+		ScanKeypad
 
 	WinScreen:
 		ldi ZH, high(Mode)
@@ -1018,10 +1031,18 @@
 		
 		KeyNotFindCode:
 
+		cpi r22, ENTERCODEMODE
+		brne KeyNotEnterCode
+		jmp KeyEnterCodeMode
+		
+		KeyNotEnterCode:
+
 		cpi r22, LOSEMODE
 		breq KeypadReset
 		cpi r22, WINMODE
 		breq KeypadReset
+
+		jmp EndKeyProcess
 
 		KeypadReset:
 			jmp Reset
@@ -1142,6 +1163,45 @@
 				GoToEnterCodeMode:
 				ldi r23, ENTERCODEMODE
 				rjmp EndKeyProcess
+
+		KeyEnterCodeMode:
+			ldi r23, 0xFF //Default return; incorrect and 3 correct keys will change this
+			
+			ldi ZH, high(RoundNum)
+			ldi ZL, low(RoundNum)
+			ld r17, Z
+
+			//Determine correct digit for the round
+			ldi ZH, high(Code)
+			ldi ZL, low(Code)
+			add ZL, r17
+			clr r17
+			adc ZH, r17
+			
+			ld r16, Z
+			cp r20, r16
+			breq KeyCorrectCode
+			
+			//Restart enter code if incorrect number entered
+			ldi r23, ENTERCODEMODE
+
+			rjmp EndKeyProcess
+
+			KeyCorrectCode:
+				//If correct code digit is entered, increment round counter so that the correct digit is checked next time
+				ldi ZH, high(RoundNum)
+				ldi ZL, low(RoundNum)
+				ld r17, Z
+				inc r17
+				st Z, r17
+
+				do_lcd_data_i '*'
+				
+				//Check if game has been won
+				cpi r17, 3
+				brne EndKeyProcess
+				
+				ldi r23, WINMODE
 
 		EndKeyProcess:
 			pop ZL
