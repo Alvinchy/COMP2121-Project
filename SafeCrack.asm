@@ -440,7 +440,7 @@
 			//Timer 3
 			ldi r16, (0b10 << COM3B0) | (0b01 << WGM30) //Clear on output compare match, 8-bit Fast PWM
 			sts TCCR3A, r16
-			ldi r16, (0b10 << WGM32) | (0b100 << CS30) //8-bit Fast PWM, Prescaler 256
+			ldi r16, (0b01 << WGM32) | (0b100 << CS30) //8-bit Fast PWM, Prescaler 256
 			sts TCCR3B, r16
 			ser r16
 			sts OCR3BL, r16
@@ -1892,6 +1892,7 @@
 		push ZL
 
 		lds r17, OCR3BL
+
 		ldi ZH, high(LCDBLOn)
 		ldi ZL, low(LCDBLOn)
 		ld r16, Z
@@ -1899,7 +1900,7 @@
 		cpi r16, 0
 		breq FadeLCDBLOff
 
-		//If not off, then it's on
+		FadeLCDBLOn:
 			cpi r17, 0xFF
 			breq EndT3OVF
 			inc r17
