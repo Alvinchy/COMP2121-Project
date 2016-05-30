@@ -165,6 +165,20 @@
 	
 		EndDivi:
 	.endmacro
+	.macro SetSpeakerTime
+		push r16
+		push ZH
+		push ZL
+
+		ldi ZH, high(SpeakerOVFCountDown)
+		ldi ZL, low(SpeakerOVFCountDown)
+		ldi r16, @0
+		st Z, r16
+		
+		pop ZL
+		pop ZH
+		pop r16
+	.endmacro
 
 //Define Constants
 	
@@ -204,6 +218,7 @@
 	PotRoundClear:	.BYTE 1 //Flag indicating if the potentiometer round has been successfully cleared
 	RoundNum: 		.BYTE 1 //Number of rounds played
 	CDTime:			.BYTE 1	//Countdown time
+	CDEnable:		.BYTE 1 //Flag indicating if countdown timer is active
 	Mode:			.BYTE 1	//Current screen
 	PBDisable:		.BYTE 1	//Disable push buttons (flag)
 	LastKey:		.BYTE 1	//Last key pressed on keypad
@@ -217,6 +232,7 @@
 	PotOVFCountdown:	.BYTE 1 //Counts number of overflows of timer 0 for a valid potentiometer read
 	StrobeOVFCount: 	.BYTE 1 //Counts number of overflows of timer 0 before the strobe needs to be toggled on the win screen
 	KeyOVFCount:		.BYTE 1 //Counts number of overflows of timer 0 before the correct number is accepted and a new round entered
+	SpeakerOVFCountdown:.BYTE 1 //Counts number of overflows of timer 0 before speaker should be turned off
 
 
 .CSEG
@@ -300,12 +316,20 @@
 			ldi ZL, low(CDOVFCount)
 			st Z, r16
 
+			ldi ZH, high(CDEnable)
+			ldi ZL, low(CDEnable)
+			st Z, r16
+
 			ldi ZH, high(StrobeOVFCount)
 			ldi ZL, low(StrobeOVFCount)
 			st Z, r16
 
 			ldi ZH, high(KeyOVFCount)
 			ldi ZL, low(KeyOVFCount)
+			st Z, r16
+
+			ldi ZH, high(SpeakerOVFCountdown)
+			ldi ZL, low(SpeakerOVFCountdown)
 			st Z, r16
 			
 			ldi r16, 20 //Default difficulty: easiest
@@ -330,6 +354,7 @@
 			ldi ZH, high(PotOVFCountdown)
 			ldi ZL, low(PotOVFCountdown)
 			st Z, r16
+
 			
 		//Set up interrupts and timers
 			//Push buttons
@@ -382,7 +407,12 @@
 			//Keypad
 			ldi r16, 0b11110000
 			sts DDRL, r16
+			
+			//Speaker
+			ldi r16, 0b00000001
+			out DDRB, r16
 
+			//Push buttons
 			clr r16
 			out DDRD, r16
 			
@@ -392,6 +422,7 @@
 			out PORTC, r16
 			out PORTG, r16
 			out PORTE, r16
+			out PORTB, r16
 			
 			ldi r16, 0b11101111 //Set up for reading letters only for start screen, enable pullup resistors
 			sts PORTL, r16
@@ -464,6 +495,12 @@
 		ldi ZL, low(Mode)
 		ldi r16, STARTCDMODE
 		st Z, r16
+		
+		//Countdown active
+		ldi ZH, high(CDEnable)
+		ldi ZL, low(CDEnable)
+		ldi r16, 1
+		st Z, r16
 
 		do_lcd_command CLEARLCD
 
@@ -529,6 +566,12 @@
 		ldi r16, RESETPOTMODE
 		st Z, r16
 
+		//Countdown active
+		ldi ZH, high(CDEnable)
+		ldi ZL, low(CDEnable)
+		ldi r16, 1
+		st Z, r16
+
 		//Disable motor
 		in r16, PORTE
 		andi r16, 0b11011111
@@ -582,6 +625,8 @@
 			//Clear the NewRound flag
 			clr r16
 			st Z, r16
+			
+			SetSpeakerTime MS500
 
 			//Reset Timer
 			ldi ZH, high(CDOVFCount)
@@ -682,6 +727,12 @@
 		ldi ZH, high(Mode)
 		ldi ZL, low(Mode)
 		ldi r16, FINDPOTMODE
+		st Z, r16
+
+		//Countdown active
+		ldi ZH, high(CDEnable)
+		ldi ZL, low(CDEnable)
+		ldi r16, 1
 		st Z, r16
 		
 		do_lcd_command CLEARLCD
@@ -838,6 +889,12 @@
 		ldi ZL, low(Mode)
 		ldi r16, FINDCODEMODE
 		st Z, r16
+
+		//Countdown inactive
+		ldi ZH, high(CDEnable)
+		ldi ZL, low(CDEnable)
+		clr r16
+		st Z, r16
 		
 		//Turn off LED bar
 		clr r16
@@ -893,6 +950,12 @@
 		ldi r16, ENTERCODEMODE
 		st Z, r16
 
+		//Countdown inactive
+		ldi ZH, high(CDEnable)
+		ldi ZL, low(CDEnable)
+		clr r16
+		st Z, r16
+
 		//Disable motor
 		in r16, PORTE
 		andi r16, 0b11011111
@@ -933,6 +996,14 @@
 		ldi r16, WINMODE
 		st Z, r16
 
+		//Countdown inactive
+		ldi ZH, high(CDEnable)
+		ldi ZL, low(CDEnable)
+		clr r16
+		st Z, r16
+
+		SetSpeakerTime MS1000
+
 		do_lcd_command CLEARLCD
 		
 		do_lcd_data_i 'G'
@@ -968,6 +1039,15 @@
 		ldi r16, LOSEMODE
 		st Z, r16
 
+		//Countdown inactive
+		ldi ZH, high(CDEnable)
+		ldi ZL, low(CDEnable)
+		clr r16
+		st Z, r16
+
+		SetSpeakerTime MS1000
+		
+		//Turn off LEDs
 		clr r16
 		out PORTC, r16
 		out PORTG, r16
@@ -1517,72 +1597,102 @@
 		ldi ZL, low(Mode)
 		ld r16, Z
 
-		ldi ZH, high(CDOVFCount)
-		ldi ZL, low(CDOVFCount)
+		ldi ZH, high(SpeakerOVFCountDown)
+		ldi ZL, low(SpeakerOVFCountDown)
 		ld r17, Z
-		inc r17
-		st Z, r17
 
-		cpi r17, MS1000
-		breq DecCDTime
+		//If SpeakerOVFCountdown is 0, do not make a sound or decrement
+		cpi r17, 0
+		breq T0AfterSpeaker
+			dec r17
+			st Z, r17
+			
+			//Toggle the speaker output; produces a wave at ~122 Hz
+			in r17, PORTB
+			ldi r18, (1 << 0)
+			eor r17, r18
+			out PORTB, r17
+
+
+		T0AfterSpeaker:
+
+			ldi ZH, high(CDOVFCount)
+			ldi ZL, low(CDOVFCount)
+			ld r17, Z
+			inc r17
+			st Z, r17
+
+			cpi r17, MS1000
+			breq DecCDTime
 
 		T0AfterCD:
 
-		//Check if potentiometer is at correct position
-		ldi ZH, high(PotCorrect)
-		ldi ZL, low(PotCorrect)
-		ld r17, Z
-		cpi r17, 0
-		breq T0AfterPot
+			//Check if potentiometer is at correct position
+			ldi ZH, high(PotCorrect)
+			ldi ZL, low(PotCorrect)
+			ld r17, Z
+			cpi r17, 0
+			breq T0AfterPot
 		
-		//If potentiometer read is correct, count time held at correct position
-		ldi ZH, high(PotOVFCountdown)
-		ldi ZL, low(PotOVFCountdown)
-		ld r17, Z
-		dec r17
-		st Z, r17
-		cpi r17, 0
-		breq SetPotRoundClear
+			//If potentiometer read is correct, count time held at correct position
+			ldi ZH, high(PotOVFCountdown)
+			ldi ZL, low(PotOVFCountdown)
+			ld r17, Z
+			dec r17
+			st Z, r17
+			cpi r17, 0
+			breq SetPotRoundClear
 		
 		T0AfterPot:
 
-		//Check if correct key is pressed
-		ldi ZH, high(KeyCorrect)
-		ldi ZL, low(KeyCorrect)
-		ld r17, Z
-		cpi r17, 0
-		breq T0AfterFindCode
+			//Check if correct key is pressed
+			ldi ZH, high(KeyCorrect)
+			ldi ZL, low(KeyCorrect)
+			ld r17, Z
+			cpi r17, 0
+			breq T0AfterFindCode
 		
-		//If key pressed is correct, count time held at correct position
-		ldi ZH, high(KeyOVFCount)
-		ldi ZL, low(KeyOVFCount)
-		ld r17, Z
-		inc r17
-		st Z, r17
-		cpi r17, MS1000
-		breq SetKeyRoundClear
+			//If key pressed is correct, count time held at correct position
+			ldi ZH, high(KeyOVFCount)
+			ldi ZL, low(KeyOVFCount)
+			ld r17, Z
+			inc r17
+			st Z, r17
+			cpi r17, MS1000
+			breq SetKeyRoundClear
 
 		T0AfterFindCode:
 
-		cpi r16, WINMODE
-		brne EndT0OVF
+			cpi r16, WINMODE
+			brne EndT0OVF
 
-		ldi ZH, high(StrobeOVFCount)
-		ldi ZL, low(StrobeOVFCount)
-		ld r17, Z
-		inc r17
-		st Z, r17
-		cpi r17, MS250
-		breq StrobeToggle
+			ldi ZH, high(StrobeOVFCount)
+			ldi ZL, low(StrobeOVFCount)
+			ld r17, Z
+			inc r17
+			st Z, r17
+			cpi r17, MS250
+			breq StrobeToggle
 
-		//More comparisions/counter increments
-		rjmp EndT0OVF
+			//More comparisions/counter increments
+			rjmp EndT0OVF
 
 		DecCDTime:
 			//Reset CDOVFCount
 			clr r17
 			st Z, r17
+
+			//Check if countdown is enabled
+			ldi ZH, high(CDEnable)
+			ldi ZL, low(CDEnable)
+			ld r17, Z
+			cpi r17, 0
+			breq CDSkipSpeaker
 			
+			SetSpeakerTime MS250
+
+			CDSkipSpeaker:
+
 			ldi ZH, high(CurrentCDTime)
 			ldi ZL, low(CurrentCDTime)
 			ld r17, Z
