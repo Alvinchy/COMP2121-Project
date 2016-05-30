@@ -65,6 +65,10 @@
 			com r20
 			or r20, r16
 			
+			//Turn on LCD and refresh idle timer if key is pressed
+			SetLCDBL 1
+			ResetLCDBLTimer
+			
 			//Compare to last button; if it's the same, skip, since the keypads are level sensitive and will read once per clock cycle
 			ld r21, Z
 			cp r21, r20
@@ -132,8 +136,11 @@
 			lsl r17
 			inc r17
 			cpi r17, 0xFF
-			breq KeyWholeLoop
+			breq GoToKeyWholeLoop
 			jmp KeyColLoop
+
+		GoToKeyWholeLoop:
+			jmp KeyWholeLoop
 	.endmacro
 	.macro ADCRead
 		push r16
@@ -178,6 +185,39 @@
 		pop ZL
 		pop ZH
 		pop r16
+	.endmacro
+	.macro SetLCDBL
+		push ZH
+		push ZL
+		push r16
+
+		ldi ZH, high(LCDBLOn)
+		ldi ZL, low(LCDBLOn)
+		ldi r16, @0
+		st Z, r16
+
+		pop r16
+		pop ZL
+		pop ZH
+	.endmacro
+	.macro ResetLCDBLTimer
+		push ZH
+		push ZL
+		push r16
+		
+		ldi r16, 5
+		ldi ZH, high(LCDBLSecCountDown)
+		ldi ZL, low(LCDBLSecCountDown)
+		st Z, r16	
+
+		clr r16
+		ldi ZH, high(LCDBLOVFCount)
+		ldi ZL, low(LCDBLOVFCount)
+		st Z, r16
+
+		pop r16
+		pop ZL
+		pop ZH
 	.endmacro
 
 //Define Constants
@@ -224,6 +264,7 @@
 	LastKey:		.BYTE 1	//Last key pressed on keypad
 	KeyCorrect:		.BYTE 1 //Flag indicating if key pressed is correct
 	NewRound:		.BYTE 1 //Flag indicating if timer on potentiometer screens needs to be reset
+	LCDBLOn:		.BYTE 1 //Flag indicating if LCD backlight should be on
 
 	//Timer dependent
 	PBDebounceTimer:	.BYTE 1 //Counts number of overflows of timer 2 before PBDisable flag is cleared
@@ -233,6 +274,8 @@
 	StrobeOVFCount: 	.BYTE 1 //Counts number of overflows of timer 0 before the strobe needs to be toggled on the win screen
 	KeyOVFCount:		.BYTE 1 //Counts number of overflows of timer 0 before the correct number is accepted and a new round entered
 	SpeakerOVFCountdown:.BYTE 1 //Counts number of overflows of timer 0 before speaker should be turned off
+	LCDBLOVFCount:		.BYTE 1 //Counts number of overflows of timer 0 to time seconds prior to turning off LCD backlight
+	LCDBLSecCountdown:	.BYTE 1 //Counts number of seconds of inactivity
 
 
 .CSEG
@@ -331,11 +374,21 @@
 			ldi ZH, high(SpeakerOVFCountdown)
 			ldi ZL, low(SpeakerOVFCountdown)
 			st Z, r16
+
+			ldi ZH, high(LCDBLOVFCount)
+			ldi ZL, low(LCDBLOVFCount)
+			st Z, r16
 			
 			ldi r16, 20 //Default difficulty: easiest
 
 			ldi ZH, high(CDTime)
 			ldi ZL, low(CDTime)
+			st Z, r16
+
+			ldi r16, 5
+
+			ldi ZH, high(LCDBLSecCountdown)
+			ldi ZL, low(LCDBLSecCountdown)
 			st Z, r16
 
 			ldi r16, 1
@@ -347,6 +400,10 @@
 			//Prevent reading bounces when game is reset using a push button
 			ldi ZH, high(PBDisable)
 			ldi ZL, low(PBDisable)
+			st Z, r16
+
+			ldi ZH, high(LCDBLOn)
+			ldi ZL, low(LCDBLOn)
 			st Z, r16
 
 			ldi r16, 0xFF
@@ -377,16 +434,18 @@
 			sts TCCR2A, r16
 			ldi r16, (0b010 << CS20) //Set prescaler to 8
 			sts TCCR2B, r16
-			ldi r16, (0b1 << TOIE0) //Enable timer 2 overflow interrupt
+			ldi r16, (0b1 << TOIE2) //Enable timer 2 overflow interrupt
 			sts TIMSK2, r16
 
 			//Timer 3
 			ldi r16, (0b10 << COM3B0) | (0b01 << WGM30) //Clear on output compare match, 8-bit Fast PWM
 			sts TCCR3A, r16
-			ldi r16, (0b10 << WGM32) | (0b100 << CS30) //8-bit Fast PWM, Prescaler 256
+			ldi r16, (0b01 << WGM32) | (0b100 << CS30) //8-bit Fast PWM, Prescaler 256
 			sts TCCR3B, r16
 			ser r16
 			sts OCR3BL, r16
+			ldi r16, (0b1 << TOIE3) //Enable timer 3 overflow interrupt
+			sts TIMSK3, r16
 
 		//Set up ports
 			ser r16
@@ -428,6 +487,7 @@
 			sts PORTL, r16
 
 		//Set up LCD
+			SetLCDBL 1 //LCD backlight is initally on
 			do_lcd_command 0b00111000 // 2x5x7
 			call sleep_5ms
 			do_lcd_command 0b00111000 // 2x5x7
@@ -838,13 +898,21 @@
 				st X, r16
 				
 				//Check if within 32 raw ADC counts by ignoring least significant bit (values already set to +/- 16 raw counts)
-				mov r19, r17
-				lsr r19
-				mov r20, r18
-				lsr r20
+				//mov r19, r17
+				//lsr r19
+				//mov r20, r18
+				//lsr r20
 
-				cp r19, r20
-				breq Within32
+				//cp r19, r20
+				//breq Within32
+				
+				//Check for within 32
+				//Since going over the value causes a return to previous screen, no need to check for if value is 32 higher than target
+				mov r19, r17
+				subi r19, -0b00000010
+				cp r18, r19
+				brlt Within32
+
 
 				//Check for within 48
 				//Since going over the value causes a return to previous screen, no need to check for if value is 48 higher than target
@@ -1447,6 +1515,10 @@
 		push r17
 		push ZH
 		push ZL
+		
+		//Turn on LCD and refresh idle timer if button is pressed
+		SetLCDBL 1
+		ResetLCDBLTimer
 
 		ldi ZH, high(PBDisable)
 		ldi ZL, low(PBDisable)
@@ -1615,7 +1687,7 @@
 
 
 		T0AfterSpeaker:
-
+			//Countdown timers
 			ldi ZH, high(CDOVFCount)
 			ldi ZL, low(CDOVFCount)
 			ld r17, Z
@@ -1662,9 +1734,9 @@
 			breq SetKeyRoundClear
 
 		T0AfterFindCode:
-
+			//Strobe
 			cpi r16, WINMODE
-			brne EndT0OVF
+			brne T0AfterStrobe
 
 			ldi ZH, high(StrobeOVFCount)
 			ldi ZL, low(StrobeOVFCount)
@@ -1674,7 +1746,26 @@
 			cpi r17, MS250
 			breq StrobeToggle
 
-			//More comparisions/counter increments
+		T0AfterStrobe:
+			//LCD Backlight
+			cpi r16, STARTMODE
+			breq LCDBLTick
+			cpi r16, WINMODE
+			breq LCDBLTick
+			cpi r16, LOSEMODE
+			breq LCDBLTick
+
+			rjmp EndT0OVF
+
+			LCDBLTick:
+				ldi ZH, high(LCDBLOVFCount)
+				ldi ZL, low(LCDBLOVFCount)
+				ld r17, Z
+				inc r17
+				st Z, r17
+				cpi r17, MS1000
+				breq LCDBLSecond
+
 			rjmp EndT0OVF
 
 		DecCDTime:
@@ -1727,16 +1818,37 @@
 			eor r18, r17
 			out PORTE, r18
 
+			rjmp T0AfterStrobe
+		
+		LCDBLSecond:
+			//Reset LCDBLOVFCount
+			clr r17
+			st Z, r17
+
+			ldi ZH, high(LCDBLSecCountdown)
+			ldi ZL, low(LCDBLSecCountdown)
+			ld r17, Z
+			cpi r17, 0
+			breq LCDBLSecSkipDec
+			
+			dec r17
+			st Z, r17
+
+			brne EndT0OVF //Decrement and do nothing if countdown has not expired yet
+
+			LCDBLSecSkipDec:
+				SetLCDBL 0
+
 
 		EndT0OVF:
-		pop ZL
-		pop ZH
-		pop r18
-		pop r17
-		pop r16
-		out SREG, r16
-		pop r16	
-		reti
+			pop ZL
+			pop ZH
+			pop r18
+			pop r17
+			pop r16
+			out SREG, r16
+			pop r16	
+			reti
 
 
 	T2OVF:
@@ -1775,21 +1887,49 @@
 		push r16
 		in r16, SREG
 		push r16
+		push r17
 		push ZH
 		push ZL
-		
-		ldi ZH, high(Mode)
-		ldi ZL, low(Mode)
+
+		lds r17, OCR3BL
+
+		ldi ZH, high(LCDBLOn)
+		ldi ZL, low(LCDBLOn)
 		ld r16, Z
 		
-		//cpi r16, 
+		cpi r16, 0
+		breq FadeLCDBLOff
+
+		FadeLCDBLOn:
+			cpi r17, 0xFF
+			breq EndT3OVF
+			inc r17
+			sts OCR3BL, r17
+			cpi r17, 0xFF
+			breq EndT3OVF
+			inc r17
+			sts OCR3BL, r17
+			rjmp EndT3OVF
+			
 		
-		pop ZL
-		pop ZH
-		pop r16
-		out SREG, r16
-		pop r16	
-		reti	
+		FadeLCDBLOff:
+			cpi r17, 0
+			breq EndT3OVF
+			dec r17
+			sts OCR3BL, r17
+			breq EndT3OVF
+			dec r17
+			sts OCR3BL, r17
+
+
+		EndT3OVF:
+			pop ZL
+			pop ZH
+			pop r17
+			pop r16
+			out SREG, r16
+			pop r16	
+			reti	
 
 	////////////////////////////////////LCD////////////////////////////////////
 	.equ LCD_RS = 7
