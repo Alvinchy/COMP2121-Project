@@ -419,8 +419,10 @@
 			//Push buttons
 			ldi r16, (0b10 << ISC10) | (0b10 << ISC00) //Falling edge triggered
 			sts EICRA, r16
+			/*//Moved to start screen, when they are needed
 			ldi r16, (1 << INT1) | (1 << INT0) //Unmask push button interrupts
 			out EIMSK, r16
+			*/
 			sei
 
 			//Timer 0
@@ -548,6 +550,9 @@
 		//Make Z point to CDTime in case difficulty is changed
 		ldi ZH, high(CDTime)
 		ldi ZL, low(CDTime)
+
+		ldi r16, (1 << INT1) | (1 << INT0) //Unmask push button interrupts
+		out EIMSK, r16
 		
 		ScanKeypad		
 
