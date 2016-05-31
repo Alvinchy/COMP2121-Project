@@ -1563,7 +1563,7 @@
 		ldi r18, low(1000)
 		ldi r19, high(1000)	
 		
-		//Determines a random 3 digit code based on timer 1 and 2
+		//Determines a random 3 digit code based on timer 0 and 2
 		lds r16, TCNT0
 		lds r17, TCNT2
 
@@ -1732,6 +1732,7 @@
 			ldi ZH, high(KeyOVFCount)
 			ldi ZL, low(KeyOVFCount)
 			ld r17, Z
+
 			inc r17
 			st Z, r17
 			cpi r17, MS1000
