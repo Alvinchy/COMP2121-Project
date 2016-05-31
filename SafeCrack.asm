@@ -1722,8 +1722,15 @@
 			ldi ZL, low(KeyCorrect)
 			ld r17, Z
 			cpi r17, 0
-			breq T0AfterFindCode
+			brne T0KeyCorrectInc
+			
+			//Reset NewRound flag
+			ldi ZH, high(NewRound)
+			ldi ZL, low(NewRound)
+			clr r17
+			st Z, r17
 		
+			T0KeyCorrectInc:
 			//If key pressed is correct, count time held at correct position
 			ldi ZH, high(KeyOVFCount)
 			ldi ZL, low(KeyOVFCount)
@@ -1734,6 +1741,7 @@
 			breq SetKeyRoundClear
 
 		T0AfterFindCode:
+
 			//Strobe
 			cpi r16, WINMODE
 			brne T0AfterStrobe
