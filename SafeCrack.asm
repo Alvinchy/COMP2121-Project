@@ -497,7 +497,7 @@
 			do_lcd_command 0b00001000 // display off?
 			do_lcd_command 0b00000001 // clear display
 			do_lcd_command 0b00000110 // increment, no display shift
-			do_lcd_command 0b00001100 // Cursor off, bar, no blink
+			do_lcd_command 0b00001100 // Cursor on, bar, no blink
 
 		//Enable global interrupts
 			sei
@@ -1722,15 +1722,8 @@
 			ldi ZL, low(KeyCorrect)
 			ld r17, Z
 			cpi r17, 0
-			brne T0KeyCorrectInc
-			
-			//Reset NewRound flag
-			ldi ZH, high(NewRound)
-			ldi ZL, low(NewRound)
-			clr r17
-			st Z, r17
-		
-			T0KeyCorrectInc:
+			breq T0AfterFindCode
+
 			//If key pressed is correct, count time held at correct position
 			ldi ZH, high(KeyOVFCount)
 			ldi ZL, low(KeyOVFCount)
