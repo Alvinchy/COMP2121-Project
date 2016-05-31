@@ -64,7 +64,7 @@
 			mov r20, r17
 			com r20
 			or r20, r16
-			
+
 			//Turn on LCD and refresh idle timer if key is pressed
 			SetLCDBL 1
 			ResetLCDBLTimer
@@ -1713,9 +1713,13 @@
 			dec r17
 			st Z, r17
 			cpi r17, 0
-			breq SetPotRoundClear
+			brne T0AfterPot
+			jmp SetPotRoundClear
 		
-		T0AfterPot:
+		T0AfterPot: //Find code
+
+			cpi r16, FINDCODEMODE
+			brne T0AfterFindCode
 
 			//Check if correct key is pressed
 			ldi ZH, high(KeyCorrect)
@@ -1732,6 +1736,7 @@
 			st Z, r17
 			cpi r17, MS1000
 			breq SetKeyRoundClear
+
 
 		T0AfterFindCode:
 
