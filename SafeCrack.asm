@@ -99,6 +99,7 @@
 			ldi r19, KEYRESETCOUNT
 			cpi r22, FINDCODEMODE
 			brne KeyNextRow
+			clr r19
 			st Z, r19 //Stores 0 in LastKey to read a continuous press when in find code mode
 			ldi r19, KEYRESETCOUNT
 
@@ -107,6 +108,7 @@
 			lsl r16
 			cpi r16, 0x10
 			breq KeyNextCol
+
 			dec r19
 			brne KeyRowLoop
 
@@ -1726,17 +1728,25 @@
 			ldi ZL, low(KeyCorrect)
 			ld r17, Z
 			cpi r17, 0
-			breq T0AfterFindCode
+			breq T0KeyIncorrect
 
 			//If key pressed is correct, count time held at correct position
 			ldi ZH, high(KeyOVFCount)
 			ldi ZL, low(KeyOVFCount)
 			ld r17, Z
-
 			inc r17
 			st Z, r17
 			cpi r17, MS1000
 			breq SetKeyRoundClear
+			
+			rjmp T0AfterFindCode
+
+			T0KeyIncorrect:
+			//If key pressed is incorrect, clear time held at correct position
+			ldi ZH, high(KeyOVFCount)
+			ldi ZL, low(KeyOVFCount)
+			clr r17
+			st Z, r17
 
 
 		T0AfterFindCode:
