@@ -1,5 +1,63 @@
 .include "m2560def.inc"
 
+//Define Constants
+	
+	.equ NUMTOASCII		= 48 //Add this value to a number to convert it to ASCII
+
+	//Keypad related
+	.equ INITCOLMASK 	= 0xEF
+	.equ INITROWMASK 	= 0x01
+	.equ KEYRESETCOUNT	= 0x0D //Count down from this before next key may be read
+
+	//LCD Commands
+	.equ CLEARLCD		= 0b00000001 //Clear display and reset cursor
+	.equ ROW2LCD		= 0b11000000 //Move cursor to beginning of row 2
+	.equ CURSORL		= 0b00010000 //Shift cursor to the left
+	.equ CURSORR		= 0b00010100 //Shift cursor to the right
+
+	//Encoding of modes
+	.equ STARTMODE		= 0b00000000 //Start screen
+	.equ STARTCDMODE	= 0b00000001 //Start screen with countdown
+	.equ RESETPOTMODE	= 0b00000010 //Reset potentiometer screen
+	.equ FINDPOTMODE	= 0b00000011 //Find potentiometer position screen
+	.equ FINDCODEMODE	= 0b00000100 //Find code screen
+	.equ ENTERCODEMODE	= 0b00000101 //Enter code screen
+	.equ WINMODE		= 0b00000110 //Game complete screen
+	.equ LOSEMODE		= 0b00000111 //Timeout screen
+
+	//Number of overflows for times with prescaler 256
+	.equ MS1000			= 244
+	.equ MS500			= 122
+	.equ MS250			= 61
+
+.DSEG
+	Code: 			.BYTE 3 //Correct code
+	PotTarget: 		.BYTE 1 //Potentiometer target
+	PotValue:		.BYTE 1 //Potentiometer read
+	PotCorrect:		.BYTE 1 //Flag indicating if the potentiometer position is correct
+	PotRoundClear:	.BYTE 1 //Flag indicating if the potentiometer round has been successfully cleared
+	RoundNum: 		.BYTE 1 //Number of rounds played
+	CDTime:			.BYTE 1	//Countdown time
+	CDEnable:		.BYTE 1 //Flag indicating if countdown timer is active
+	Mode:			.BYTE 1	//Current screen
+	PBDisable:		.BYTE 1	//Disable push buttons (flag)
+	LastKey:		.BYTE 1	//Last key pressed on keypad
+	KeyCorrect:		.BYTE 1 //Flag indicating if key pressed is correct
+	NewRound:		.BYTE 1 //Flag indicating if timer on potentiometer screens needs to be reset
+	LCDBLOn:		.BYTE 1 //Flag indicating if LCD backlight should be on
+
+	//Timer dependent
+	PBDebounceTimer:	.BYTE 1 //Counts number of overflows of timer 2 before PBDisable flag is cleared
+	CurrentCDTime:		.BYTE 1 //Stores the current value of the countdown
+	CDOVFCount:			.BYTE 1 //Counts number of overflows of timer 0 for the operation of countdowns
+	PotOVFCountdown:	.BYTE 1 //Counts number of overflows of timer 0 for a valid potentiometer read
+	StrobeOVFCount: 	.BYTE 1 //Counts number of overflows of timer 0 before the strobe needs to be toggled on the win screen
+	KeyOVFCount:		.BYTE 1 //Counts number of overflows of timer 0 before the correct number is accepted and a new round entered
+	SpeakerOVFCountdown:.BYTE 1 //Counts number of overflows of timer 0 before speaker should be turned off
+	LCDBLOVFCount:		.BYTE 1 //Counts number of overflows of timer 0 to time seconds prior to turning off LCD backlight
+	LCDBLSecCountdown:	.BYTE 1 //Counts number of seconds of inactivity
+
+
 //Define Macros
 	.macro do_lcd_command
 		push r16
@@ -8,6 +66,7 @@
 		call lcd_wait
 		pop r16
 	.endmacro
+
 	.macro do_lcd_data
 		push r16
 		mov r16, @0
@@ -15,6 +74,7 @@
 		call lcd_wait
 		pop r16
 	.endmacro
+
 	.macro do_lcd_data_i
 		push r16
 		ldi r16, @0
@@ -22,6 +82,7 @@
 		call lcd_wait
 		pop r16
 	.endmacro
+
 	.macro ScanKeypad //cannot place in function; loop terminated by button, ret would cause issues in stack
 	//r16 (Row Mask)
 	//r17 (Col Mask)
@@ -144,6 +205,7 @@
 		GoToKeyWholeLoop:
 			jmp KeyWholeLoop
 	.endmacro
+
 	.macro ADCRead
 		push r16
 		ldi r16, (3 << REFS0) | (0 << ADLAR) | (0 << MUX0)
@@ -154,6 +216,7 @@
 		sts ADCSRA, r16
 		pop r16
 	.endmacro
+
 	.macro divi //format: divi Rd, k; Rd/k : stores remainder in Rd result in R0
 		push r16
 		//mov R0, @0
@@ -174,6 +237,7 @@
 	
 		EndDivi:
 	.endmacro
+
 	.macro SetSpeakerTime
 		push r16
 		push ZH
@@ -188,6 +252,7 @@
 		pop ZH
 		pop r16
 	.endmacro
+
 	.macro SetLCDBL
 		push ZH
 		push ZL
@@ -202,6 +267,7 @@
 		pop ZL
 		pop ZH
 	.endmacro
+
 	.macro ResetLCDBLTimer
 		push ZH
 		push ZL
@@ -222,62 +288,7 @@
 		pop ZH
 	.endmacro
 
-//Define Constants
-	
-	.equ NUMTOASCII		= 48 //Add this value to a number to convert it to ASCII
 
-	//Keypad related
-	.equ INITCOLMASK 	= 0xEF
-	.equ INITROWMASK 	= 0x01
-	.equ KEYRESETCOUNT	= 0x0D //Count down from this before next key may be read
-
-	//LCD Commands
-	.equ CLEARLCD		= 0b00000001 //Clear display and reset cursor
-	.equ ROW2LCD		= 0b11000000 //Move cursor to beginning of row 2
-	.equ CURSORL		= 0b00010000 //Shift cursor to the left
-	.equ CURSORR		= 0b00010100 //Shift cursor to the right
-
-	//Encoding of modes
-	.equ STARTMODE		= 0b00000000 //Start screen
-	.equ STARTCDMODE	= 0b00000001 //Start screen with countdown
-	.equ RESETPOTMODE	= 0b00000010 //Reset potentiometer screen
-	.equ FINDPOTMODE	= 0b00000011 //Find potentiometer position screen
-	.equ FINDCODEMODE	= 0b00000100 //Find code screen
-	.equ ENTERCODEMODE	= 0b00000101 //Enter code screen
-	.equ WINMODE		= 0b00000110 //Game complete screen
-	.equ LOSEMODE		= 0b00000111 //Timeout screen
-
-	//Number of overflows for times with prescaler 256
-	.equ MS1000			= 244
-	.equ MS500			= 122
-	.equ MS250			= 61
-
-.DSEG
-	Code: 			.BYTE 3 //Correct code
-	PotTarget: 		.BYTE 1 //Potentiometer target
-	PotValue:		.BYTE 1 //Potentiometer read
-	PotCorrect:		.BYTE 1 //Flag indicating if the potentiometer position is correct
-	PotRoundClear:	.BYTE 1 //Flag indicating if the potentiometer round has been successfully cleared
-	RoundNum: 		.BYTE 1 //Number of rounds played
-	CDTime:			.BYTE 1	//Countdown time
-	CDEnable:		.BYTE 1 //Flag indicating if countdown timer is active
-	Mode:			.BYTE 1	//Current screen
-	PBDisable:		.BYTE 1	//Disable push buttons (flag)
-	LastKey:		.BYTE 1	//Last key pressed on keypad
-	KeyCorrect:		.BYTE 1 //Flag indicating if key pressed is correct
-	NewRound:		.BYTE 1 //Flag indicating if timer on potentiometer screens needs to be reset
-	LCDBLOn:		.BYTE 1 //Flag indicating if LCD backlight should be on
-
-	//Timer dependent
-	PBDebounceTimer:	.BYTE 1 //Counts number of overflows of timer 2 before PBDisable flag is cleared
-	CurrentCDTime:		.BYTE 1 //Stores the current value of the countdown
-	CDOVFCount:			.BYTE 1 //Counts number of overflows of timer 0 for the operation of countdowns
-	PotOVFCountdown:	.BYTE 1 //Counts number of overflows of timer 0 for a valid potentiometer read
-	StrobeOVFCount: 	.BYTE 1 //Counts number of overflows of timer 0 before the strobe needs to be toggled on the win screen
-	KeyOVFCount:		.BYTE 1 //Counts number of overflows of timer 0 before the correct number is accepted and a new round entered
-	SpeakerOVFCountdown:.BYTE 1 //Counts number of overflows of timer 0 before speaker should be turned off
-	LCDBLOVFCount:		.BYTE 1 //Counts number of overflows of timer 0 to time seconds prior to turning off LCD backlight
-	LCDBLSecCountdown:	.BYTE 1 //Counts number of seconds of inactivity
 
 
 .CSEG
