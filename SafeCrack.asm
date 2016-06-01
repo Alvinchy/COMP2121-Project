@@ -542,14 +542,6 @@
 
 		do_lcd_data_i 'E' //Difficulty display; default is Easy
 
-		//Scan for letters being pressed on keypad
-		ldi r16, 0b01111111
-		sts PORTL, r16
-		
-		//Make Z point to CDTime in case difficulty is changed
-		ldi ZH, high(CDTime)
-		ldi ZL, low(CDTime)
-
 		ldi r16, (1 << INT1) | (1 << INT0) //Unmask push button interrupts
 		out EIMSK, r16
 		
@@ -744,7 +736,6 @@
 			st X, r16
 
 		ResetPotLoop:
-		//r16: time remaining
 			
 			ldi XH, high(PotRoundClear)
 			ldi XL, low(PotRoundClear)
@@ -903,15 +894,6 @@
 				clr r16
 				st X, r16
 				
-				//Check if within 32 raw ADC counts by ignoring least significant bit (values already set to +/- 16 raw counts)
-				//mov r19, r17
-				//lsr r19
-				//mov r20, r18
-				//lsr r20
-
-				//cp r19, r20
-				//breq Within32
-				
 				//Check for within 32
 				//Since going over the value causes a return to previous screen, no need to check for if value is 32 higher than target
 				mov r19, r17
@@ -926,7 +908,7 @@
 				subi r19, -0b00000011
 				cp r18, r19
 				brlt Within48
-				
+
 				rjmp UpdateFindPotTimer
 
 				Within32:
@@ -1152,9 +1134,7 @@
 
 		ScanKeypad
 
-	//Endless loop to halt operation
-	LOOP:
-		rjmp LOOP
+
 	////////////////////////////////Functions/////////////////////////////////
 	
 	KeyProcess:
