@@ -423,7 +423,6 @@
 			ldi r16, (1 << INT1) | (1 << INT0) //Unmask push button interrupts
 			out EIMSK, r16
 			*/
-			sei
 
 			//Timer 0
 			clr r16 //Normal timer operation
